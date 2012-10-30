@@ -16,6 +16,7 @@
 
 ifeq ($(TARGET_SOC),exynos5250)
 exynos5250_dirs := \
+	libcamera2 \
 	gralloc
 
 include $(call all-named-subdir-makefiles,$(exynos5250_dirs))
