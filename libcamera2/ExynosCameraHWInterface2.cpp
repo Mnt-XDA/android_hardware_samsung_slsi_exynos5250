@@ -4207,10 +4207,10 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
             ALOGV("DEBUG(%s): m_pictureBuf.fd.extFd[%d]=%d ",
                 __FUNCTION__, i, srcImageBuf->fd.extFd[i]);
         csc_set_src_buffer(m_exynosPictureCSC,
-                           (void **)&srcImageBuf->fd.fd);
+                           (void **)&srcImageBuf->fd.fd, CSC_MEMORY_DMABUF);
 
         csc_set_dst_buffer(m_exynosPictureCSC,
-                           (void **)&m_resizeBuf.fd.fd);
+                           (void **)&m_resizeBuf.fd.fd, CSC_MEMORY_DMABUF);
         for (int i = 0 ; i < 3 ; i++)
             ALOGV("DEBUG(%s): m_resizeBuf.virt.extP[%d]=%d m_resizeBuf.size.extS[%d]=%d",
                 __FUNCTION__, i, m_resizeBuf.fd.extFd[i], i, m_resizeBuf.size.extS[i]);
@@ -4369,10 +4369,10 @@ int ExynosCameraHWInterface2::m_recordCreator(StreamThread *selfThread, ExynosBu
                            1);
 
         csc_set_src_buffer(m_exynosVideoCSC,
-                        (void **)&srcImageBuf->fd.fd);
+                        (void **)&srcImageBuf->fd.fd, CSC_MEMORY_DMABUF);
 
         csc_set_dst_buffer(m_exynosVideoCSC,
-            (void **)(&(subParms->svcBuffers[subParms->svcBufIndex].fd.fd)));
+            (void **)(&(subParms->svcBuffers[subParms->svcBufIndex].fd.fd)), CSC_MEMORY_DMABUF);
 
         if (csc_convert(m_exynosVideoCSC) != 0) {
             ALOGE("ERR(%s):csc_convert() fail", __FUNCTION__);
@@ -4489,10 +4489,10 @@ int ExynosCameraHWInterface2::m_prvcbCreator(StreamThread *selfThread, ExynosBuf
                                1);
 
             csc_set_src_buffer(m_exynosVideoCSC,
-                        (void **)&srcImageBuf->fd.fd);
+                        (void **)&srcImageBuf->fd.fd, CSC_MEMORY_DMABUF);
 
             csc_set_dst_buffer(m_exynosVideoCSC,
-                (void **)(&(m_previewCbBuf.fd.fd)));
+                (void **)(&(m_previewCbBuf.fd.fd)), CSC_MEMORY_DMABUF);
 
             if (csc_convert(m_exynosVideoCSC) != 0) {
                 ALOGE("ERR(%s):previewcb csc_convert() fail", __FUNCTION__);
