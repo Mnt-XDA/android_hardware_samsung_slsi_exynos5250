@@ -191,8 +191,8 @@ enum is_set_command_state {
 
 typedef struct node_info {
     int fd;
-    int width;
-    int height;
+    uint32_t width;
+    uint32_t height;
     int format;
     int planes;
     int buffers;
@@ -287,20 +287,20 @@ public:
     bool    PrepareFrame(size_t *num_entries, size_t *frame_size,
                 camera_metadata_t **prepared_frame, int afState);
     int     MarkProcessingRequest(ExynosBuffer * buf);
-    void    NotifyStreamOutput(int frameCnt);
+    void    NotifyStreamOutput(uint32_t frameCnt);
     void    ApplyDynamicMetadata(struct camera2_shot_ext *shot_ext);
     void    CheckCompleted(int index);
     void    UpdateIspParameters(struct camera2_shot_ext *shot_ext, int frameCnt, ctl_request_info_t *ctl_info);
-    void    RegisterTimestamp(int frameCnt, nsecs_t *frameTime);
-    nsecs_t  GetTimestampByFrameCnt(int frameCnt);
+    void    RegisterTimestamp(uint32_t frameCnt, nsecs_t *frameTime);
+    nsecs_t  GetTimestampByFrameCnt(uint32_t frameCnt);
     nsecs_t  GetTimestamp(int index);
-    uint8_t  GetOutputStreamByFrameCnt(int frameCnt);
+    uint8_t  GetOutputStreamByFrameCnt(uint32_t frameCnt);
     uint8_t  GetOutputStream(int index);
-    camera2_shot_ext *  GetInternalShotExtByFrameCnt(int frameCnt);
+    camera2_shot_ext *  GetInternalShotExtByFrameCnt(uint32_t frameCnt);
     camera2_shot_ext *  GetInternalShotExt(int index);
     int     FindFrameCnt(struct camera2_shot_ext * shot_ext);
     bool    IsVdisEnable(void);
-    int     FindEntryIndexByFrameCnt(int frameCnt);
+    int     FindEntryIndexByFrameCnt(uint32_t frameCnt);
     void    Dump(void);
     int     GetNextIndex(int index);
     int     GetPrevIndex(int index);
@@ -330,7 +330,7 @@ private:
 
     int                             m_sensorPipelineSkipCnt;
     int                             m_cropX;
-    int                             m_lastCompletedFrameCnt;
+    uint32_t                         m_lastCompletedFrameCnt;
     int                             m_lastAeMode;
     int                             m_lastAaMode;
     int                             m_lastAwbMode;

@@ -39,14 +39,14 @@ namespace android {
 struct ExynosCamera2Info
 {
 public:
-    int32_t     sensorW;
-    int32_t     sensorH;
-    int32_t     sensorRawW;
-    int32_t     sensorRawH;
+    uint32_t     sensorW;
+    uint32_t     sensorH;
+    uint32_t     sensorRawW;
+    uint32_t     sensorRawH;
     int         numScalerResolution;
-    const int32_t     *scalerResolutions;
+    const uint32_t     *scalerResolutions;
     int         numJpegResolution;
-    const int32_t     *jpegResolutions;
+    const uint32_t     *jpegResolutions;
     float       minFocusDistance;
     float       focalLength;
     float       aperture;
@@ -83,13 +83,13 @@ public:
 
     ExynosCamera2Info  *m_curCameraInfo;
 
-    int32_t getSensorW();
-    int32_t getSensorH();
-    int32_t getSensorRawW();
-    int32_t getSensorRawH();
+    uint32_t getSensorW();
+    uint32_t getSensorH();
+    uint32_t getSensorRawW();
+    uint32_t getSensorRawH();
 
-    bool isSupportedResolution(int width, int height);
-    bool isSupportedJpegResolution(int width, int height);
+    bool isSupportedResolution(uint32_t width, uint32_t height);
+    bool isSupportedJpegResolution(uint32_t width, uint32_t height);
 
     status_t constructStaticInfo(camera_metadata_t **info,
         int cameraId, bool sizeRequest);

@@ -113,7 +113,7 @@ const uint64_t kAvailableJpegMinDurations[1] = {
     Sensor::kFrameDurationRange[0]
 };
 
-const int32_t scalerResolutionS5K4E5[] =
+const uint32_t scalerResolutionS5K4E5[] =
 {
     1920, 1080, // 16:9
     1440, 1080, // 4:3
@@ -133,7 +133,7 @@ const int32_t scalerResolutionS5K4E5[] =
      128,   96, // 4:3
 };
 
-const int32_t jpegResolutionS5K4E5[] =
+const uint32_t jpegResolutionS5K4E5[] =
 {
     2560, 1920,
     2560, 1440,
@@ -209,7 +209,7 @@ ExynosCamera2InfoS5K4E5::~ExynosCamera2InfoS5K4E5()
 {
     ALOGV("%s", __FUNCTION__);
 }
-const int32_t scalerResolutionS5K6A3[] =
+const uint32_t scalerResolutionS5K6A3[] =
 {
     1344,  896, // 3:2
     1280, 1024, // 5:4
@@ -229,7 +229,7 @@ const int32_t scalerResolutionS5K6A3[] =
      128,   96, // 4:3
 };
 
-const int32_t jpegResolutionS5K6A3[] =
+const uint32_t jpegResolutionS5K6A3[] =
 {
     1392, 1392,
     1392, 1040,
@@ -316,27 +316,27 @@ ExynosCamera2::~ExynosCamera2()
     m_curCameraInfo = NULL;
 }
 
-int32_t ExynosCamera2::getSensorW()
+uint32_t ExynosCamera2::getSensorW()
 {
     return m_curCameraInfo->sensorW;
 }
 
-int32_t ExynosCamera2::getSensorH()
+uint32_t ExynosCamera2::getSensorH()
 {
     return m_curCameraInfo->sensorH;
 }
 
-int32_t ExynosCamera2::getSensorRawW()
+uint32_t ExynosCamera2::getSensorRawW()
 {
     return m_curCameraInfo->sensorRawW;
 }
 
-int32_t ExynosCamera2::getSensorRawH()
+uint32_t ExynosCamera2::getSensorRawH()
 {
     return m_curCameraInfo->sensorRawH;
 }
 
-bool ExynosCamera2::isSupportedResolution(int width, int height)
+bool ExynosCamera2::isSupportedResolution(uint32_t width, uint32_t height)
 {
     int i;
     for (i = 0 ; i < m_curCameraInfo->numScalerResolution ; i++) {
@@ -348,7 +348,7 @@ bool ExynosCamera2::isSupportedResolution(int width, int height)
     return false;
 }
 
-bool ExynosCamera2::isSupportedJpegResolution(int width, int height)
+bool ExynosCamera2::isSupportedJpegResolution(uint32_t width, uint32_t height)
 {
     int i;
     for (i = 0 ; i < m_curCameraInfo->numJpegResolution ; i++) {
