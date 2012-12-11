@@ -92,6 +92,8 @@ status_t MetadataConverter::ToInternalShot(camera_metadata_t * request, struct c
     dst->ctl.aa.aeTargetFpsRange[0] = 15;
     dst->ctl.aa.aeTargetFpsRange[1] = 30;
     dst->ctl.aa.aeExpCompensation = 5;
+    dst->ctl.aa.isoMode = AA_ISOMODE_AUTO;
+    dst->ctl.aa.isoValue = 0;
 
     num_entry = (uint32_t)get_camera_metadata_entry_count(request);
     for (index = 0 ; index < num_entry ; index++) {
@@ -141,6 +143,8 @@ status_t MetadataConverter::ToInternalShot(camera_metadata_t * request, struct c
             case ANDROID_SENSOR_SENSITIVITY:
                 if (NO_ERROR != CheckEntryTypeMismatch(&curr_entry, TYPE_INT32, 1))
                     break;
+                dst->ctl.aa.isoMode = AA_ISOMODE_MANUAL;
+                dst->ctl.aa.isoValue = curr_entry.data.i32[0];
                 dst->dm.aa.isoValue = curr_entry.data.i32[0];
                 break;
 
@@ -481,8 +485,6 @@ status_t MetadataConverter::ApplySceneModeParameters(camera_metadata_t * request
         if ((dst->ctl.aa.aeMode != AA_AEMODE_LOCKED) && (dst->ctl.aa.aeMode < AA_AEMODE_ON_AUTO_FLASH))
             dst->ctl.aa.aeMode = AA_AEMODE_ON;
         dst->ctl.aa.sceneMode = AA_SCENE_MODE_FACE_PRIORITY;
-        dst->ctl.aa.isoMode = AA_ISOMODE_AUTO;
-        dst->ctl.aa.isoValue = 0;
         dst->ctl.noise.mode = PROCESSING_MODE_OFF;
         dst->ctl.noise.strength = 0;
         dst->ctl.edge.mode = PROCESSING_MODE_OFF;
@@ -495,8 +497,6 @@ status_t MetadataConverter::ApplySceneModeParameters(camera_metadata_t * request
         if ((dst->ctl.aa.aeMode != AA_AEMODE_LOCKED) && (dst->ctl.aa.aeMode < AA_AEMODE_ON_AUTO_FLASH))
             dst->ctl.aa.aeMode = AA_AEMODE_ON;
         dst->ctl.aa.sceneMode = AA_SCENE_MODE_UNSUPPORTED;
-        dst->ctl.aa.isoMode = AA_ISOMODE_AUTO;
-        dst->ctl.aa.isoValue = 0;
         dst->ctl.noise.mode = PROCESSING_MODE_OFF;
         dst->ctl.noise.strength = 0;
         dst->ctl.edge.mode = PROCESSING_MODE_OFF;
