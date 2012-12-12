@@ -16,7 +16,6 @@
 
 #ifndef ANDROID_EXYNOS_HWC_MODULE_H_
 #define ANDROID_EXYNOS_HWC_MODULE_H_
-#define EXYNOS_HDMI_DISPLAY
 const size_t GSC_DST_W_ALIGNMENT_RGB888 = 32;
 const size_t GSC_DST_CROP_W_ALIGNMENT_RGB888 = 32;
 #define VSYNC_DEV_NAME  "/sys/devices/platform/exynos5-fb.1/vsync"
