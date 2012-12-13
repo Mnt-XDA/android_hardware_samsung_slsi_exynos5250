@@ -20,5 +20,5 @@ const size_t GSC_DST_W_ALIGNMENT_RGB888 = 32;
 const size_t GSC_DST_CROP_W_ALIGNMENT_RGB888 = 32;
 #define VSYNC_DEV_NAME  "/sys/devices/platform/exynos5-fb.1/vsync"
 #define MIXER_UPDATE
-
+#define SUPPORT_GSC_LOCAL_PATH
 #endif
