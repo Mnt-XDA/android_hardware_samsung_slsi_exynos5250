@@ -713,6 +713,8 @@ void    RequestManager::UpdateIspParameters(struct camera2_shot_ext *shot_ext, i
         m_lastAeComp = (int)(shot_ext->shot.ctl.aa.aeExpCompensation);
     }
 
+    shot_ext->shot.ctl.color.mode = request_shot->shot.ctl.color.mode;
+
     if (request_shot->shot.ctl.aa.videoStabilizationMode) {
         m_vdisBubbleEn = true;
         shot_ext->dis_bypass = 0;

@@ -81,7 +81,7 @@ status_t MetadataConverter::ToInternalShot(camera_metadata_t * request, struct c
     uint32_t    cnt = 0;
     camera_metadata_entry_t curr_entry;
     struct camera2_shot * dst = NULL;
-
+    aa_effect_mode tempEffectMode = AA_EFFECT_OFF;
     if (request == NULL || dst_ext == NULL)
         return BAD_VALUE;
 
@@ -375,6 +375,20 @@ status_t MetadataConverter::ToInternalShot(camera_metadata_t * request, struct c
                 dst->ctl.aa.sceneMode = (enum aa_scene_mode)(curr_entry.data.u8[0] + 1);
                 break;
 
+            case ANDROID_COLOR_MODE:
+                if (NO_ERROR != CheckEntryTypeMismatch(&curr_entry, TYPE_BYTE, 1))
+                    break;
+                dst->ctl.color.mode = (enum colorcorrection_mode)(curr_entry.data.u8[0]);
+                ALOGE("DEBUG(%s): converted ANDROID_COLOR_MODE (%d)",  __FUNCTION__, dst->ctl.color.mode);
+                break;
+
+            case ANDROID_CONTROL_EFFECT_MODE:
+                if (NO_ERROR != CheckEntryTypeMismatch(&curr_entry, TYPE_BYTE, 1))
+                    break;
+                tempEffectMode = (enum aa_effect_mode)(curr_entry.data.u8[0] + 1);
+                ALOGE("DEBUG(%s): converted ANDROID_CONTROL_EFFECT_MODE (%d)",  __FUNCTION__, tempEffectMode);
+                break;
+
             case ANDROID_CONTROL_AE_TARGET_FPS_RANGE:
                 if (NO_ERROR != CheckEntryTypeMismatch(&curr_entry, TYPE_INT32, 2))
                     break;
@@ -388,6 +402,10 @@ status_t MetadataConverter::ToInternalShot(camera_metadata_t * request, struct c
             }
         }
     }
+
+    if (tempEffectMode != AA_EFFECT_OFF)
+        dst->ctl.color.mode = (enum colorcorrection_mode)(tempEffectMode + 2);
+
     if (dst->ctl.aa.mode != AA_CONTROL_USE_SCENE_MODE)
         dst->ctl.aa.sceneMode = AA_SCENE_MODE_UNSUPPORTED;
     ApplySceneModeParameters(request, dst_ext);
@@ -515,6 +533,8 @@ status_t MetadataConverter::ToDynamicMetadata(struct camera2_shot_ext * metadata
     struct camera2_shot * metadata = &metadata_ext->shot;
     uint8_t  byteData;
     uint32_t intData;
+    uint8_t  tempColorMode = 0;
+    uint8_t  tempEffectMode = 0;
 
     if (0 != add_camera_metadata_entry(dst, ANDROID_REQUEST_ID,
                 &(metadata->ctl.request.id), 1))
@@ -566,6 +586,24 @@ status_t MetadataConverter::ToDynamicMetadata(struct camera2_shot_ext * metadata
 
     byteData = metadata->ctl.aa.sceneMode - 1;
     if (0 != add_camera_metadata_entry(dst, ANDROID_CONTROL_SCENE_MODE,
+                &byteData, 1))
+        return NO_MEMORY;
+
+    if (metadata->dm.color.mode >= COLORCORRECTION_MODE_EFFECT_MONO) {
+        tempColorMode = ANDROID_COLOR_FAST;
+        tempEffectMode = (uint8_t)(metadata->dm.color.mode - 3);
+    } else {
+        tempColorMode = (uint8_t)metadata->dm.color.mode;
+        tempEffectMode = ANDROID_CONTROL_EFFECT_OFF;
+    }
+
+    byteData = tempColorMode;
+    if (0 != add_camera_metadata_entry(dst, ANDROID_COLOR_MODE,
+                &byteData, 1))
+        return NO_MEMORY;
+
+    byteData = tempEffectMode;
+    if (0 != add_camera_metadata_entry(dst, ANDROID_CONTROL_EFFECT_MODE,
                 &byteData, 1))
         return NO_MEMORY;
 
