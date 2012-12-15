@@ -4067,6 +4067,8 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
     buffer_handle_t * buf = NULL;
     camera2_jpeg_blob * jpegBlob = NULL;
     int jpegBufSize = 0;
+    bool needsIonUnmap = false;
+    bool jpegRes = false;
 
     ALOGV("DEBUG(%s): index(%d)",__FUNCTION__, subParms->svcBufIndex);
     for (int i = 0 ; subParms->numSvcBuffers ; i++) {
@@ -4095,7 +4097,7 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
     m_jpegPictureRect.w = subParms->width;
     m_jpegPictureRect.h = subParms->height;
 
-     ALOGV("DEBUG(%s):w = %d, h = %d, w = %d, h = %d",
+    ALOGV("DEBUG(%s):w = %d, h = %d, w = %d, h = %d",
               __FUNCTION__, selfStreamParms->width, selfStreamParms->height,
                    m_jpegPictureRect.w, m_jpegPictureRect.h);
 
@@ -4107,7 +4109,21 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
     pictureFormat = V4L2_PIX_FMT_YUYV;
     pictureFramesize = FRAME_SIZE(V4L2_PIX_2_HAL_PIXEL_FORMAT(pictureFormat), pictureW, pictureH);
 
-    if (m_exynosPictureCSC) {
+    if ((selfStreamParms->width == m_jpegPictureRect.w) && (selfStreamParms->height == m_jpegPictureRect.h)) {
+        ALOGV("(%s): Bypassing Resize and CSC", __FUNCTION__);
+
+        jpegRect.w = m_jpegPictureRect.w;
+        jpegRect.h = m_jpegPictureRect.h;
+        jpegRect.colorFormat = V4L2_PIX_FMT_YUYV;
+
+        if (srcImageBuf->virt.extP[0] == 0) {
+            srcImageBuf->virt.extP[0] = (char *)ion_map(srcImageBuf->fd.extFd[0], srcImageBuf->size.extS[0], 0);
+            needsIonUnmap = true;
+        }
+
+        jpegBufSize = subParms->svcBuffers[subParms->svcBufIndex].size.extS[0];
+        jpegRes = yuv2Jpeg(srcImageBuf, &subParms->svcBuffers[subParms->svcBufIndex], &jpegRect);
+    } else if (m_exynosPictureCSC) {
         float zoom_w = 0, zoom_h = 0;
         if (m_zoomRatio == 0)
             m_zoomRatio = 1;
@@ -4153,35 +4169,29 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
         if (csc_convert(m_exynosPictureCSC) != 0)
             ALOGE("ERR(%s): csc_convert() fail", __FUNCTION__);
 
-    }
-    else {
+        resizeBufInfo = m_resizeBuf;
+
+        m_getAlignedYUVSize(V4L2_PIX_FMT_NV16, m_jpegPictureRect.w, m_jpegPictureRect.h, &m_resizeBuf);
+
+        jpegRect.w = m_jpegPictureRect.w;
+        jpegRect.h = m_jpegPictureRect.h;
+        jpegRect.colorFormat = V4L2_PIX_FMT_NV16;
+
+        for (int j = 0; j < 3; j++)
+            ALOGV("DEBUG(%s): dest buf node  fd.extFd[%d]=%d size=%d virt=%x ",
+                __FUNCTION__, j, subParms->svcBuffers[subParms->svcBufIndex].fd.extFd[j],
+                (unsigned int)subParms->svcBuffers[subParms->svcBufIndex].size.extS[j],
+                (unsigned int)subParms->svcBuffers[subParms->svcBufIndex].virt.extP[j]);
+
+        jpegBufSize = subParms->svcBuffers[subParms->svcBufIndex].size.extS[0];
+        jpegRes = yuv2Jpeg(&m_resizeBuf, &subParms->svcBuffers[subParms->svcBufIndex], &jpegRect);
+    } else {
         ALOGE("ERR(%s): m_exynosPictureCSC == NULL", __FUNCTION__);
+        jpegRes = false;
     }
 
-    resizeBufInfo = m_resizeBuf;
-
-    m_getAlignedYUVSize(V4L2_PIX_FMT_NV16, m_jpegPictureRect.w, m_jpegPictureRect.h, &m_resizeBuf);
-
-    for (int i = 1; i < 3; i++) {
-        if (m_resizeBuf.size.extS[i] != 0)
-            m_resizeBuf.fd.extFd[i] = m_resizeBuf.fd.extFd[i-1] + m_resizeBuf.size.extS[i-1];
-
-        ALOGV("(%s): m_resizeBuf.size.extS[%d] = %d", __FUNCTION__, i, m_resizeBuf.size.extS[i]);
-    }
-
-    jpegRect.w = m_jpegPictureRect.w;
-    jpegRect.h = m_jpegPictureRect.h;
-    jpegRect.colorFormat = V4L2_PIX_FMT_NV16;
-
-    for (int j = 0 ; j < 3 ; j++)
-        ALOGV("DEBUG(%s): dest buf node  fd.extFd[%d]=%d size=%d virt=%x ",
-            __FUNCTION__, j, subParms->svcBuffers[subParms->svcBufIndex].fd.extFd[j],
-            (unsigned int)subParms->svcBuffers[subParms->svcBufIndex].size.extS[j],
-            (unsigned int)subParms->svcBuffers[subParms->svcBufIndex].virt.extP[j]);
-
-    jpegBufSize = subParms->svcBuffers[subParms->svcBufIndex].size.extS[0];
-    if (yuv2Jpeg(&m_resizeBuf, &subParms->svcBuffers[subParms->svcBufIndex], &jpegRect) == false) {
-        ALOGE("ERR(%s):yuv2Jpeg() fail", __FUNCTION__);
+    if (jpegRes == false) {
+        ALOGE("ERR(%s): Jpeg Encode fail", __FUNCTION__);
     } else {
         m_resizeBuf = resizeBufInfo;
 
@@ -4196,6 +4206,13 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
         jpegBlob->jpeg_size = jpegSize;
         jpegBlob->jpeg_blob_id = CAMERA2_JPEG_BLOB_ID;
     }
+
+    if (needsIonUnmap) {
+        ion_unmap(srcImageBuf->virt.extP[0], srcImageBuf->size.extS[0]);
+        needsIonUnmap = false;
+        srcImageBuf->virt.extP[0] = 0;
+    }
+
     subParms->svcBuffers[subParms->svcBufIndex].size.extS[0] = jpegBufSize;
     res = subParms->streamOps->enqueue_buffer(subParms->streamOps, frameTimeStamp, &(subParms->svcBufHandle[subParms->svcBufIndex]));
 
