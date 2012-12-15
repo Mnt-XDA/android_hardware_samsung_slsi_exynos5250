@@ -57,7 +57,6 @@
 namespace android {
 
 //#define EXYNOS_CAMERA_LOG
-#define ENABLE_FRAME_SYNC
 #define NODE_PREFIX     "/dev/video"
 
 #define NUM_MAX_STREAM_THREAD       (5)
@@ -644,9 +643,6 @@ class MainThread : public SignalDrivenThread {
     bool                                m_scp_flushing;
     bool                                m_closing;
     ExynosBuffer                        m_resizeBuf;
-#ifndef ENABLE_FRAME_SYNC
-    int                                 m_currentOutputStreams;
-#endif
     int                                 m_currentReprocessOutStreams;
     ExynosBuffer                        m_previewCbBuf;
     int             				    m_cameraId;
