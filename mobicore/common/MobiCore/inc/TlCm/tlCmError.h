@@ -51,6 +51,9 @@
 #define RET_ERR_EXT_NOT_REGISTERED                   0xE00000B0
 #define RET_ERR_EXT_NOT_ACTIVATED                    0xE00000C0
 #define RET_ERR_EXT_CONTAINER_FULL                   0xE00000D0
+#define RET_ERR_EXT_ALREADY_LOCKED                   0xE00000E0
+#define RET_ERR_EXT_NOT_LOCKED                       0xE00000F0
+
 #define RET_ERR_EXT_INTERNAL_ERROR                   0xE0001000
 
 #define RET_ERR_EXT_UNSPECIFIED                      0xEEEEEEEE
@@ -58,5 +61,3 @@
 #endif // TLCMERROR_H_
 
 /** @} */
-
-

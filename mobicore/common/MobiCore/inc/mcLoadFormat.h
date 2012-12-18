@@ -40,6 +40,7 @@
 #define MCLOADFORMAT_H_
 
 #include "mcUuid.h"
+#include "mcSuid.h"
 #include "mcDriverId.h"
 
 #define MCLF_VERSION_MAJOR   2
@@ -102,7 +103,7 @@ typedef struct {
 
 // Version 2 /////////////////////////////////////////////////////////////////////////////////////////////////////////
 /**
- * @defgroup MCLF_VER_V2   MCLF Version 2
+ * @defgroup MCLF_VER_V2   MCLF Version 32
  * @ingroup MCLF_VER
  *
  * @addtogroup MCLF_VER_V2
@@ -110,7 +111,7 @@ typedef struct {
  */
 
 /**
- * Version 2 MCLF header.
+ * Version 2.1 MCLF header.
  */
 typedef struct {
     mclfIntro_t             intro;           /**< MCLF header start with the mandatory intro. */
@@ -135,6 +136,11 @@ typedef struct {
     uint32_t                bssLen;         /**< Length of the BSS segment in bytes. MUST be at least 8 byte. */
     addr_t                  entry;          /**< Virtual start address of service code. */
     uint32_t                serviceVersion; /**< Version of the interface the driver exports. */
+
+// These should be put on next MCLF update:
+//    mcSuid_t                permittedSuid;  /**< Starting 2.2: If nonzero, suid which is allowed to execute binary */
+//    uint32_t                permittedHwCf;  /**< Starting 2.2: If nonzero, hw configuration which is allowed to execute binary */
+
 } mclfHeaderV2_t, *mclfHeaderV2_ptr;
 /** @} */
 
@@ -159,6 +165,12 @@ typedef struct {
                                                  Required always. */
     addr_t                  mcLibBase;      /**< McLib base address.
                                                  Mobicore sets at load time for trustlets / drivers.
+                                                 Required always. */
+    uint32_t                tlApiVers;      /**< TlApi version used when building trustlet.
+                                                 Value set at compile time.
+                                                 Required always. */
+    uint32_t                drApiVers;      /**< DrApi version used when building trustlet.
+                                                 Value set at compile time for drivers. 0 for trustlets.
                                                  Required always. */
 } mclfTextHeader_t, *mclfTextHeader_ptr;
 

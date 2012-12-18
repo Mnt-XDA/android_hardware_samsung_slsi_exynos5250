@@ -14,9 +14,11 @@ APP_STL := stlport_static
 APP_OPTIM := debug
 
 # Application wide Cflags
-GLOBAL_INCLUDES := $(COMP_PATH_MobiCore)/inc \
-	$(COMP_PATH_MobiCoreDriverMod)/Public \
-	$(COMP_PATH_MobiCore)/inc/TlCm
+GLOBAL_INCLUDES := \
+    $(COMP_PATH_MobiCoreDriverMod)/Public \
+    $(COMP_PATH_TlSdk)/Public/MobiCore/inc \
+    $(COMP_PATH_MobiCore)/inc \
+    $(COMP_PATH_MobiCore)/inc/TlCm
 
 # Show all warnings
 APP_CFLAGS += -Wall

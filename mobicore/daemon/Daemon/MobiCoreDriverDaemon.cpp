@@ -50,7 +50,7 @@
 
 #include "log.h"
 
-#define DRIVER_TCI_LEN 100
+#define DRIVER_TCI_LEN 4096
 
 #include "Mci/mci.h"
 
@@ -144,12 +144,12 @@ void MobiCoreDriverDaemon::run(
         mobiCoreDevice->donateRam(donateRamSize);
     }
 
-    if (mobiCoreDevice->mobicoreAlreadyRunning()) {
+    if ( mobiCoreDevice->mobicoreAlreadyRunning() ) {
         // MC is already initialized, remove all pending sessions
         #define NUM_DRIVERS         2
         #define NUM_TRUSTLETS       4
         #define NUM_SESSIONS        (1 + NUM_DRIVERS + NUM_TRUSTLETS)
-        for (i = 2; i < NUM_SESSIONS; i++) {
+        for (i = 2; i<NUM_SESSIONS; i++) {
             LOG_I("Closing session %i",i);
             mobiCoreDevice->closeSession(i);
         }
@@ -703,6 +703,7 @@ bool MobiCoreDriverDaemon::handleConnection(
     /* In case of RTM fault do not try to signal anything to MobiCore
      * just answer NO to all incoming connections! */
     if (mobiCoreDevice->getMcFault()) {
+        LOG_I("Ignore request, MobiCore has faulted before.");
         return false;
     }
 

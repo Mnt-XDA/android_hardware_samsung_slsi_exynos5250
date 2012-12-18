@@ -39,15 +39,10 @@
 #include "mcUuid.h"
 #include "mcSpid.h"
 
-#define SO_USE_VERSION_22 TRUE
+#define SO_USE_VERSION_22 1
 
-#if SO_USE_VERSION_22
-  #define SO_VERSION_MAJOR   2
-  #define SO_VERSION_MINOR   2
-#else
-  #define SO_VERSION_MAJOR   2
-  #define SO_VERSION_MINOR   1
-#endif
+#define SO_VERSION_MAJOR   2
+#define SO_VERSION_MINOR   2
 
 #define MC_ENUM_32BIT_SPACER           ((int32_t)-1)
 
@@ -205,9 +200,9 @@ typedef struct {
 #define MC_SO22_RND_SIZE             16
 
 /** Hash size for current generated wrapping */
-#define MC_SO2X_HASH_SIZE (SO_USE_VERSION_22 ? MC_SO22_HASH_SIZE : MC_SO21_HASH_SIZE)
+#define MC_SO2X_HASH_SIZE MC_SO22_HASH_SIZE
 /** Random size for current generated wrapping */
-#define MC_SO2X_RND_SIZE (SO_USE_VERSION_22 ? MC_SO22_RND_SIZE : MC_SO21_RND_SIZE)
+#define MC_SO2X_RND_SIZE MC_SO22_RND_SIZE
 
 #define MC_SO_ENCRYPT_PADDED_SIZE_F21(netsize) ( (netsize) + \
     MC_SO_MAX_PADDING_SIZE - (netsize) % MC_SO_MAX_PADDING_SIZE )
@@ -233,14 +228,10 @@ typedef struct {
     )
 #define MC_SO_SIZE_F21(plainLen, encryptedLen) ( \
     ((plainLen) + (encryptedLen) < (encryptedLen) || (plainLen) + (encryptedLen) > MC_SO_PAYLOAD_MAX_SIZE) ? 0 : \
-            sizeof(mcSoHeader_t) + (plainLen) + MC_SO_ENCRYPT_PADDED_SIZE_F21((encryptedLen) + MC_SO_HASH_SIZE) \
+            sizeof(mcSoHeader_t) +(plainLen) +MC_SO_ENCRYPT_PADDED_SIZE_F21((encryptedLen) +MC_SO_HASH_SIZE) \
 )
 
-#if SO_USE_VERSION_22
-    #define MC_SO_SIZE(plainLen, encryptedLen) MC_SO_SIZE_F22(plainLen, encryptedLen)
-#else
-    #define MC_SO_SIZE(plainLen, encryptedLen) MC_SO_SIZE_F21(plainLen, encryptedLen)
-#endif
+#define MC_SO_SIZE(plainLen, encryptedLen) MC_SO_SIZE_F22(plainLen, encryptedLen)
 
 #endif // MC_SO_H_
 

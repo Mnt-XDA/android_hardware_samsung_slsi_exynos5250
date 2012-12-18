@@ -73,7 +73,8 @@ CMutex devMutex;
 Device *resolveDeviceId(uint32_t deviceId)
 {
     for (list<Device *>::iterator iterator = devices.begin();
-            iterator != devices.end(); ++iterator) {
+         iterator != devices.end();
+         ++iterator) {
         Device  *device = (*iterator);
 
         if (device->deviceId == deviceId) {
@@ -116,10 +117,21 @@ bool removeDevice(uint32_t deviceId)
 #define CHECK_DEVICE(device) \
     if (NULL == device) \
     { \
-        LOG_E("Device not found"); \
+        LOG_E("Device has not been found"); \
         mcResult = MC_DRV_ERR_UNKNOWN_DEVICE; \
         break; \
     }
+
+#define CHECK_DEVICE_CLOSED(device,  deviceId) \
+    if (NULL == device && MC_DEVICE_ID_DEFAULT == deviceId) \
+    { \
+        LOG_E("Device not open"); \
+        mcResult = MC_DRV_ERR_DAEMON_DEVICE_NOT_OPEN; \
+        break; \
+    } else \
+    	CHECK_DEVICE(device);
+
+
 
 #define CHECK_NOT_NULL(X) \
     if (NULL == X) \
@@ -264,7 +276,8 @@ __MC_CLIENT_LIB_API mcResult_t mcCloseDevice(
     LOG_I("===%s(%i)===", __FUNCTION__, deviceId);
     do {
         Device *device = resolveDeviceId(deviceId);
-        CHECK_DEVICE(device);
+        // CHECK_DEVICE(device);
+        CHECK_DEVICE_CLOSED(device, deviceId);
 
         Connection *devCon = device->connection;
 
@@ -635,7 +648,12 @@ __MC_CLIENT_LIB_API mcResult_t mcMallocWsm(
 
     do {
         Device *device = resolveDeviceId(deviceId);
-        CHECK_DEVICE(device);
+
+        // Is the device known
+        // CHECK_DEVICE(device);
+
+        // Is the device opened.
+        CHECK_DEVICE_CLOSED(device, deviceId)
 
         CHECK_NOT_NULL(wsm);
 
@@ -674,7 +692,12 @@ __MC_CLIENT_LIB_API mcResult_t mcFreeWsm(
 
         // Get the device associated wit the given session
         device = resolveDeviceId(deviceId);
+
+        // Is the device known
         CHECK_DEVICE(device);
+
+        // Is the device opened.
+        CHECK_DEVICE_CLOSED(device, deviceId)
 
         // find WSM object
         CWsm_ptr pWsm = device->findContiguousWsm(wsm);
@@ -721,7 +744,11 @@ __MC_CLIENT_LIB_API mcResult_t mcMap(
 
         // Determine device the session belongs to
         Device *device = resolveDeviceId(sessionHandle->deviceId);
+        // Is the device known
         CHECK_DEVICE(device);
+
+        // Is the device opened.
+        CHECK_DEVICE_CLOSED(device, sessionHandle->deviceId)
 
         Connection *devCon = device->connection;
 
@@ -807,7 +834,11 @@ __MC_CLIENT_LIB_API mcResult_t mcUnmap(
 
         // Determine device the session belongs to
         Device *device = resolveDeviceId(sessionHandle->deviceId);
+        // Is the device known
         CHECK_DEVICE(device);
+
+        // Is the device opened.
+        CHECK_DEVICE_CLOSED(device, sessionHandle->deviceId)
 
         Connection  *devCon = device->connection;
 
@@ -879,7 +910,11 @@ __MC_CLIENT_LIB_API mcResult_t mcGetSessionErrorCode(
 
         // Get device
         Device *device = resolveDeviceId(session->deviceId);
+        // Is the device known
         CHECK_DEVICE(device);
+
+        // Is the device opened.
+        CHECK_DEVICE_CLOSED(device, session->deviceId)
 
         // Get session
         Session *nqsession = device->resolveSessionId(session->sessionId);
@@ -919,7 +954,12 @@ __MC_CLIENT_LIB_API mcResult_t mcGetMobiCoreVersion(
     do {
         Device *device = resolveDeviceId(deviceId);
 
+        // Is the device known
         CHECK_DEVICE(device);
+
+        // Is the device opened.
+        CHECK_DEVICE_CLOSED(device, deviceId)
+
         CHECK_NOT_NULL(versionInfo);
 
         Connection *devCon = device->connection;
@@ -955,6 +995,7 @@ __MC_CLIENT_LIB_API mcResult_t mcGetMobiCoreVersion(
 // Must be taken with devMutex locked.
 uint32_t getDaemonVersion(Connection *devCon, uint32_t *version)
 {
+    assert(devCon != NULL);
     assert(version != NULL);
     mcResult_t mcResult = MC_DRV_OK;
     uint32_t v = 0;
@@ -976,7 +1017,7 @@ uint32_t getDaemonVersion(Connection *devCon, uint32_t *version)
 
     } while (0);
 
-    if (MC_DRV_OK == mcResult) {
+    if (mcResult == MC_DRV_OK) {
         *version = v;
     }
 

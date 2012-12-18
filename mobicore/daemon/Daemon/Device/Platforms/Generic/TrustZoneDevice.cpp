@@ -146,14 +146,15 @@ bool TrustZoneDevice::initDevice(
         // It is assumed that MobiCore always switches state at a certain point in time.
         while (1) {
             uint32_t status = getMobicoreStatus();
+            uint32_t timeslot;
 
             if (MC_STATUS_INITIALIZED == status) {
                 break;
             } else if (MC_STATUS_NOT_INITIALIZED == status) {
                 // Switch to MobiCore to give it more CPU time.
-                if (!yield())
-                    return false;
-		::sleep(1);
+                for (timeslot = 0; timeslot < 10; timeslot++)
+                    if (!yield())
+                        return false;
             } else if (MC_STATUS_HALT == status) {
                 dumpMobicoreStatus();
                 LOG_E("MobiCore halted during init !!!, state is 0x%x", status);
@@ -273,8 +274,9 @@ notification_t notification = { sessionId :
 uint32_t TrustZoneDevice::getMobicoreStatus(void)
 {
     uint32_t status;
-
-    pMcKMod->fcInfo(1, &status, NULL);
+    //IMPROVEMENT-2012-03-07-maneaval Can fcInfo ever fail? Before it threw an
+    //exception but the handler depended on the context.
+    pMcKMod->fcInfo(0, &status, NULL);
 
     return status;
 }

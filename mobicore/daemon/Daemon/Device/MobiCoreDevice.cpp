@@ -414,8 +414,6 @@ mcResult_t MobiCoreDevice::closeSession(uint32_t sessionId)
 
     return MC_DRV_OK;
 }
-
-//------------------------------------------------------------------------------
 /**
  * TODO-2012-09-19-haenellu: Do some more checks here, otherwise rogue clientLib
  * can close sessions from different TLCs. That is, deviceConnection is ignored below.
