@@ -575,6 +575,7 @@ class MainThread : public SignalDrivenThread {
 	void				initCameraMemory(ExynosBuffer *buf, int iMemoryNum);
 
     void            DumpInfoWithShot(struct camera2_shot_ext * shot_ext);
+    bool            dumpImage(struct ExynosBuffer *buffer, char *filename, int num, char *type);
     bool            m_checkThumbnailSize(int w, int h);
     bool            yuv2Jpeg(ExynosBuffer *yuvBuf,
                             ExynosBuffer *jpegBuf,

@@ -3080,6 +3080,7 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
         struct camera2_shot_ext *shot_ext;
         struct camera2_shot_ext *shot_ext_capture;
         bool triggered = false;
+        bool rawDumpMode = false;
 
         /* dqbuf from sensor */
         ALOGV("Sensor DQbuf start");
@@ -3106,6 +3107,13 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
                 frameTime = systemTime();
                 m_requestManager->RegisterTimestamp(matchedFrameCnt, &frameTime);
                 m_requestManager->UpdateIspParameters(shot_ext, matchedFrameCnt, &m_ctlInfo);
+
+                char value[PROPERTY_VALUE_MAX];
+                property_get("camera.disable_zsl_mode", value, "0");
+                if (!strcmp(value,"1"))
+                    rawDumpMode = true;
+                else
+                    rawDumpMode = false;
             } else {
                 ALOGV("bubble for vids: m_vdisBubbleCnt %d, matchedFrameCnt %d", m_vdisDupFrame, matchedFrameCnt);
             }
@@ -3382,6 +3390,14 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
 
             if (shot_ext->shot.dm.request.frameCount == 0) {
                 CAM_LOGE("ERR(%s): dm.request.frameCount = %d", __FUNCTION__, shot_ext->shot.dm.request.frameCount);
+            }
+
+            /* raw file dump */
+            if ((shot_ext->request_scc == 1) &&
+                (shot_ext->shot.ctl.request.outputStreams[0] & STREAM_MASK_JPEG) &&
+                rawDumpMode) {
+                ALOGD("bayer dump - %d", matchedFrameCnt);
+                dumpImage(&m_camera_info.sensor.buffer[index], "bayer", matchedFrameCnt, "raw");
             }
 
             cam_int_qbuf(&(m_camera_info.isp), index);
@@ -4581,6 +4597,37 @@ bool ExynosCameraHWInterface2::m_checkThumbnailSize(int w, int h)
 
     return false;
 }
+
+bool ExynosCameraHWInterface2::dumpImage(struct ExynosBuffer *buffer, char *filename, int num, char *type)
+{
+    FILE *fd = NULL;
+    struct timeval tv;
+    struct tm tm;
+    char filepath[64];
+    char teePath[32];
+    /* file creation */
+    gettimeofday(&tv, NULL);
+    localtime_r(&tv.tv_sec, &tm);
+    strftime(teePath, sizeof(teePath), "%Y%m%d_%H%M%S", &tm);
+    sprintf(filepath, "/data/%s_%s_%d.%s", filename, teePath, num, type);
+    fd = fopen(filepath, "wb");
+    if (fd == NULL) {
+        ALOGE("dump image file open error");
+        return false;
+    }
+
+    ALOGD("%s : addr = %#x, size = %ld", filepath, buffer->virt.extP[0], buffer->size.extS[0]);
+    fflush(stdout);
+
+    fwrite(buffer->virt.extP[0], 1, buffer->size.extS[0], fd);
+    fflush(fd);
+
+    if (fd)
+        fclose(fd);
+
+    return true;
+}
+
 bool ExynosCameraHWInterface2::yuv2Jpeg(ExynosBuffer *yuvBuf,
                             ExynosBuffer *jpegBuf,
                             ExynosRect *rect)
