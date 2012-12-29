@@ -484,6 +484,13 @@ enum aa_aemode {
  AA_AEMODE_ON_ALWAYS_FLASH,
  AA_AEMODE_ON_AUTO_FLASH_REDEYE
 };
+enum aa_metering_aemode {
+ AA_AEMODE_METERING_NONE = 0,
+ AA_AEMODE_CENTER = 3,
+ AA_AEMODE_AVERAGE,
+ AA_AEMODE_MATRIX,
+ AA_AEMODE_SPOT
+};
 enum aa_ae_flashmode {
 /* WARNING: DO NOT EDIT, AUTO-GENERATED CODE - SEE TOP FOR INSTRUCTIONS */
  AA_FLASHMODE_NOP = 0,
@@ -788,6 +795,7 @@ struct camera2_shot_ext {
 /* WARNING: DO NOT EDIT, AUTO-GENERATED CODE - SEE TOP FOR INSTRUCTIONS */
  enum awb_lockmode awb_lock;
  enum aa_awbmode awb_mode_dm;
+ enum aa_metering_aemode metering_mode;
 };
 struct camera2_stream {
 /* WARNING: DO NOT EDIT, AUTO-GENERATED CODE - SEE TOP FOR INSTRUCTIONS */

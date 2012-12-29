@@ -677,6 +677,9 @@ void    RequestManager::UpdateIspParameters(struct camera2_shot_ext *shot_ext, i
             ctl_info->flash.i_flashMode = request_shot->shot.ctl.aa.aeMode;
         request_shot->shot.ctl.aa.aeMode = AA_AEMODE_ON;
     }
+    /* Apply metering mode */
+    if (request_shot->metering_mode > AA_AEMODE_METERING_NONE)
+        request_shot->shot.ctl.aa.aeMode = (enum aa_aemode)request_shot->metering_mode;
 
     // Apply ae/awb lock or unlock
     if (request_shot->ae_lock == AEMODE_LOCK_ON)
