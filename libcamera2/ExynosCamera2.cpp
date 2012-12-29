@@ -589,12 +589,12 @@ status_t ExynosCamera2::constructStaticInfo(camera_metadata_t **info,
             m_curCameraInfo->availableAeModes, m_curCameraInfo->numAvailableAeModes);
 
     static const camera_metadata_rational exposureCompensationStep = {
-            1, 1
+            1, 2
     };
     ADD_OR_SIZE(ANDROID_CONTROL_AE_EXP_COMPENSATION_STEP,
             &exposureCompensationStep, 1);
 
-    int32_t exposureCompensationRange[] = {-3, 3};
+    int32_t exposureCompensationRange[] = {-4, 4};
     ADD_OR_SIZE(ANDROID_CONTROL_AE_EXP_COMPENSATION_RANGE,
             exposureCompensationRange,
             sizeof(exposureCompensationRange)/sizeof(int32_t));
