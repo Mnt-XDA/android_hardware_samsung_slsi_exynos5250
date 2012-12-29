@@ -379,14 +379,12 @@ status_t MetadataConverter::ToInternalShot(camera_metadata_t * request, struct c
                 if (NO_ERROR != CheckEntryTypeMismatch(&curr_entry, TYPE_BYTE, 1))
                     break;
                 dst->ctl.color.mode = (enum colorcorrection_mode)(curr_entry.data.u8[0]);
-                ALOGE("DEBUG(%s): converted ANDROID_COLOR_MODE (%d)",  __FUNCTION__, dst->ctl.color.mode);
                 break;
 
             case ANDROID_CONTROL_EFFECT_MODE:
                 if (NO_ERROR != CheckEntryTypeMismatch(&curr_entry, TYPE_BYTE, 1))
                     break;
                 tempEffectMode = (enum aa_effect_mode)(curr_entry.data.u8[0] + 1);
-                ALOGE("DEBUG(%s): converted ANDROID_CONTROL_EFFECT_MODE (%d)",  __FUNCTION__, tempEffectMode);
                 break;
 
             case ANDROID_CONTROL_AE_TARGET_FPS_RANGE:
@@ -417,109 +415,378 @@ status_t MetadataConverter::ApplySceneModeParameters(camera_metadata_t * request
     camera_metadata_entry_t curr_entry;
     struct camera2_shot * dst = NULL;
 
-    ALOGV("DEBUG(%s):", __FUNCTION__);
-
     dst = &(dst_ext->shot);
+    dst_ext->metering_mode = AA_AEMODE_METERING_NONE;
+
+    ALOGV("DEBUG(%s): - %d", __FUNCTION__, dst->ctl.aa.sceneMode);
 
     switch (dst->ctl.aa.sceneMode) {
-
     case AA_SCENE_MODE_ACTION:
+        /* use specific scene mode setting */
         dst->ctl.aa.mode = AA_CONTROL_USE_SCENE_MODE;
-        if (dst->ctl.aa.aeMode != AA_AEMODE_LOCKED)
-            dst->ctl.aa.aeMode = AA_AEMODE_ON;
-        dst->ctl.aa.awbMode = AA_AWBMODE_WB_AUTO;
-        dst_ext->awb_mode_dm = AA_AWBMODE_WB_AUTO;
+        /* ISO */
         dst->ctl.aa.isoMode = AA_ISOMODE_AUTO;
         dst->ctl.aa.isoValue = 0;
+        /* Metering */
+        dst_ext->metering_mode = AA_AEMODE_CENTER;
+        /* EV */
+        /* AWB */
+        dst->ctl.aa.awbMode = AA_AWBMODE_WB_AUTO;
+        dst_ext->awb_mode_dm = AA_AWBMODE_WB_AUTO;
+        /* Saturation */
+        dst->ctl.color.saturation = 3; /* means '0' */
+        /* Flash */
+        if (dst->ctl.aa.aeMode != AA_AEMODE_LOCKED)
+            dst->ctl.aa.aeMode = AA_AEMODE_ON; /* Flash off */
+        /* FPS */
         dst->ctl.aa.aeTargetFpsRange[0] = 30;
         dst->ctl.aa.aeTargetFpsRange[1] = 30;
-
+        /* Sharpness */
         dst->ctl.noise.mode = PROCESSING_MODE_FAST;
         dst->ctl.noise.strength = 0;
         dst->ctl.edge.mode = PROCESSING_MODE_FAST;
         dst->ctl.edge.strength = 0;
+        break;
 
-        dst->ctl.color.saturation = 3; // means '0'
+    case AA_SCENE_MODE_SPORTS:
+        /* use specific scene mode setting */
+        dst->ctl.aa.mode = AA_CONTROL_USE_SCENE_MODE;
+        /* ISO */
+        dst->ctl.aa.isoMode = AA_ISOMODE_AUTO;
+        dst->ctl.aa.isoValue = 0;
+        /* Metering */
+        dst_ext->metering_mode = AA_AEMODE_CENTER;
+        /* EV */
+        /* AWB */
+        dst->ctl.aa.awbMode = AA_AWBMODE_WB_AUTO;
+        dst_ext->awb_mode_dm = AA_AWBMODE_WB_AUTO;
+        /* Saturation */
+        dst->ctl.color.saturation = 3; /* means '0' */
+        /* Flash */
+        if (dst->ctl.aa.aeMode != AA_AEMODE_LOCKED)
+            dst->ctl.aa.aeMode = AA_AEMODE_ON; /* Flash off */
+        /* FPS */
+        dst->ctl.aa.aeTargetFpsRange[0] = 30;
+        dst->ctl.aa.aeTargetFpsRange[1] = 30;
+        /* Sharpness */
+        dst->ctl.noise.mode = PROCESSING_MODE_FAST;
+        dst->ctl.noise.strength = 0;
+        dst->ctl.edge.mode = PROCESSING_MODE_FAST;
+        dst->ctl.edge.strength = 0;
+        break;
+
+    case AA_SCENE_MODE_PORTRAIT:
+        dst->ctl.aa.mode = AA_CONTROL_AUTO;
+        /* ISO */
+        dst->ctl.aa.isoMode = AA_ISOMODE_AUTO;
+        dst->ctl.aa.isoValue = 0;
+        /* Metering */
+        dst_ext->metering_mode = AA_AEMODE_CENTER;
+        /* EV */
+        /* AWB */
+        dst->ctl.aa.awbMode = AA_AWBMODE_WB_AUTO;
+        dst_ext->awb_mode_dm = AA_AWBMODE_WB_AUTO;
+        /* Saturation */
+        dst->ctl.color.saturation = 3; /* means '0' */
+        /* Sharpness */
+        dst->ctl.noise.mode = PROCESSING_MODE_FAST;
+        dst->ctl.noise.strength = 0;
+        dst->ctl.edge.mode = PROCESSING_MODE_HIGH_QUALITY;
+        dst->ctl.edge.strength = 5; /* means '-1' */
+        break;
+
+    case AA_SCENE_MODE_LANDSCAPE:
+        dst->ctl.aa.mode = AA_CONTROL_AUTO;
+        /* ISO */
+        dst->ctl.aa.isoMode = AA_ISOMODE_AUTO;
+        dst->ctl.aa.isoValue = 0;
+        /* Metering */
+        dst_ext->metering_mode = AA_AEMODE_MATRIX;
+        /* EV */
+        /* AWB */
+        dst->ctl.aa.awbMode = AA_AWBMODE_WB_AUTO;
+        dst_ext->awb_mode_dm = AA_AWBMODE_WB_AUTO;
+        /* Saturation */
+        dst->ctl.color.saturation = 4; /* means '1' */
+        /* Flash */
+        if (dst->ctl.aa.aeMode != AA_AEMODE_LOCKED)
+            dst->ctl.aa.aeMode = AA_AEMODE_ON; /* Flash off */
+        /* Sharpness */
+        dst->ctl.noise.mode = PROCESSING_MODE_HIGH_QUALITY;
+        dst->ctl.noise.strength = 5; /* means '+1' */
+        dst->ctl.edge.mode = PROCESSING_MODE_FAST;
+        dst->ctl.edge.strength = 0;
+        break;
+
+    case AA_SCENE_MODE_SNOW:
+    case AA_SCENE_MODE_BEACH:
+        dst->ctl.aa.mode = AA_CONTROL_AUTO;
+        /* ISO */
+        dst->ctl.aa.isoMode = AA_ISOMODE_MANUAL;
+        dst->ctl.aa.isoValue = 50;
+        /* Metering */
+        dst_ext->metering_mode = AA_AEMODE_CENTER;
+        /* EV */
+        dst->ctl.aa.aeExpCompensation = 6; /* means '+1' */
+        /* AWB */
+        dst->ctl.aa.awbMode = AA_AWBMODE_WB_AUTO;
+        dst_ext->awb_mode_dm = AA_AWBMODE_WB_AUTO;
+        /* Saturation */
+        dst->ctl.color.saturation = 4; /* means '+1' */
+        /* Flash */
+        if (dst->ctl.aa.aeMode != AA_AEMODE_LOCKED)
+            dst->ctl.aa.aeMode = AA_AEMODE_ON; /* Flash off */
+        /* FPS */
+        dst->ctl.aa.aeTargetFpsRange[0] = 15;
+        dst->ctl.aa.aeTargetFpsRange[1] = 30;
+        /* Sharpness */
+        dst->ctl.noise.mode = PROCESSING_MODE_FAST;
+        dst->ctl.noise.strength = 0;
+        dst->ctl.edge.mode = PROCESSING_MODE_FAST;
+        dst->ctl.edge.strength = 0;
         break;
 
     case AA_SCENE_MODE_PARTY:
+        /* use specific scene mode setting */
         dst->ctl.aa.mode = AA_CONTROL_USE_SCENE_MODE;
-        if (dst->ctl.aa.aeMode != AA_AEMODE_LOCKED)
-            dst->ctl.aa.aeMode = AA_AEMODE_ON;
-        dst->ctl.aa.awbMode = AA_AWBMODE_WB_AUTO;
-        dst_ext->awb_mode_dm = AA_AWBMODE_WB_AUTO;
+        /* ISO */
         dst->ctl.aa.isoMode = AA_ISOMODE_MANUAL;
         dst->ctl.aa.isoValue = 200;
+        /* Metering */
+        dst_ext->metering_mode = AA_AEMODE_CENTER;
+        /* EV */
+        /* AWB */
+        dst->ctl.aa.awbMode = AA_AWBMODE_WB_AUTO;
+        dst_ext->awb_mode_dm = AA_AWBMODE_WB_AUTO;
+        /* Saturation */
+        dst->ctl.color.saturation = 4; /* means '+1' */
+        /* Flash */
+        if (dst->ctl.aa.aeMode != AA_AEMODE_LOCKED)
+            dst->ctl.aa.aeMode = AA_AEMODE_ON; /* Flash off */
+        /* FPS */
         dst->ctl.aa.aeTargetFpsRange[0] = 15;
         dst->ctl.aa.aeTargetFpsRange[1] = 30;
-
+        /* Sharpness */
         dst->ctl.noise.mode = PROCESSING_MODE_FAST;
         dst->ctl.noise.strength = 0;
         dst->ctl.edge.mode = PROCESSING_MODE_FAST;
         dst->ctl.edge.strength = 0;
-
-        dst->ctl.color.saturation = 4; // means '+1'
         break;
 
     case AA_SCENE_MODE_SUNSET:
+        /* use specific scene mode setting */
         dst->ctl.aa.mode = AA_CONTROL_USE_SCENE_MODE;
-        if (dst->ctl.aa.aeMode != AA_AEMODE_LOCKED)
-            dst->ctl.aa.aeMode = AA_AEMODE_ON;
-        dst->ctl.aa.awbMode = AA_AWBMODE_WB_DAYLIGHT;
-        dst_ext->awb_mode_dm = AA_AWBMODE_WB_DAYLIGHT;
+        /* ISO */
         dst->ctl.aa.isoMode = AA_ISOMODE_AUTO;
         dst->ctl.aa.isoValue = 0;
+        /* Metering */
+        dst_ext->metering_mode = AA_AEMODE_CENTER;
+        /* EV */
+        /* AWB */
+        dst->ctl.aa.awbMode = AA_AWBMODE_WB_DAYLIGHT;
+        dst_ext->awb_mode_dm = AA_AWBMODE_WB_DAYLIGHT;
+        /* Saturation */
+        dst->ctl.color.saturation = 3; /* means '0' */
+        /* Flash */
+        if (dst->ctl.aa.aeMode != AA_AEMODE_LOCKED)
+            dst->ctl.aa.aeMode = AA_AEMODE_ON; /* Flash off */
+        /* FPS */
         dst->ctl.aa.aeTargetFpsRange[0] = 15;
         dst->ctl.aa.aeTargetFpsRange[1] = 30;
-
+        /* Sharpness */
         dst->ctl.noise.mode = PROCESSING_MODE_FAST;
         dst->ctl.noise.strength = 0;
         dst->ctl.edge.mode = PROCESSING_MODE_FAST;
         dst->ctl.edge.strength = 0;
+        break;
 
-        dst->ctl.color.saturation = 3; // means '0'
+    case AA_SCENE_MODE_DAWN:
+        dst->ctl.aa.mode = AA_CONTROL_AUTO;
+        /* ISO */
+        dst->ctl.aa.isoMode = AA_ISOMODE_AUTO;
+        dst->ctl.aa.isoValue = 0;
+        /* Metering */
+        dst_ext->metering_mode = AA_AEMODE_CENTER;
+        /* EV */
+        dst->ctl.color.saturation = 3; /* means '0' */
+        /* AWB */
+        dst->ctl.aa.awbMode = AA_AWBMODE_WB_FLUORESCENT;
+        dst_ext->awb_mode_dm = AA_AWBMODE_WB_FLUORESCENT;
+        /* Saturation */
+        dst->ctl.color.saturation = 3; /* means '0' */
+        /* Flash */
+        if (dst->ctl.aa.aeMode != AA_AEMODE_LOCKED)
+            dst->ctl.aa.aeMode = AA_AEMODE_ON; /* Flash off */
+        /* FPS */
+        dst->ctl.aa.aeTargetFpsRange[0] = 15;
+        dst->ctl.aa.aeTargetFpsRange[1] = 30;
+        /* Sharpness */
+        dst->ctl.noise.mode = PROCESSING_MODE_FAST;
+        dst->ctl.noise.strength = 0;
+        dst->ctl.edge.mode = PROCESSING_MODE_FAST;
+        dst->ctl.edge.strength = 0;
+        break;
+
+    case AA_SCENE_MODE_FALL:
+        dst->ctl.aa.mode = AA_CONTROL_AUTO;
+        /* ISO */
+        dst->ctl.aa.isoMode = AA_ISOMODE_AUTO;
+        dst->ctl.aa.isoValue = 0;
+        /* Metering */
+        dst_ext->metering_mode = AA_AEMODE_CENTER;
+        /* EV */
+        /* AWB */
+        dst->ctl.aa.awbMode = AA_AWBMODE_WB_AUTO;
+        dst_ext->awb_mode_dm = AA_AWBMODE_WB_AUTO;
+        /* Saturation */
+        dst->ctl.color.saturation = 5; /* means '2' */
+        /* Flash */
+        if (dst->ctl.aa.aeMode != AA_AEMODE_LOCKED)
+            dst->ctl.aa.aeMode = AA_AEMODE_ON; /* Flash off */
+        /* FPS */
+        dst->ctl.aa.aeTargetFpsRange[0] = 15;
+        dst->ctl.aa.aeTargetFpsRange[1] = 30;
+        /* Sharpness */
+        dst->ctl.noise.mode = PROCESSING_MODE_FAST;
+        dst->ctl.noise.strength = 0;
+        dst->ctl.edge.mode = PROCESSING_MODE_FAST;
+        dst->ctl.edge.strength = 0;
+        break;
+
+    case AA_SCENE_MODE_FIREWORKS:
+        dst->ctl.aa.mode = AA_CONTROL_AUTO;
+        /* ISO */
+        dst->ctl.aa.isoMode = AA_ISOMODE_MANUAL;
+        dst->ctl.aa.isoValue = 50;
+        /* Metering */
+        dst_ext->metering_mode = AA_AEMODE_CENTER;
+        /* EV */
+        /* AWB */
+        dst->ctl.aa.awbMode = AA_AWBMODE_WB_AUTO;
+        dst_ext->awb_mode_dm = AA_AWBMODE_WB_AUTO;
+        /* Saturation */
+        dst->ctl.color.saturation = 3; /* means '0' */
+        /* Flash */
+        if (dst->ctl.aa.aeMode != AA_AEMODE_LOCKED)
+            dst->ctl.aa.aeMode = AA_AEMODE_ON; /* Flash off */
+        /* FPS */
+        dst->ctl.aa.aeTargetFpsRange[0] = 8; /* TODO : fix fps range */
+        dst->ctl.aa.aeTargetFpsRange[1] = 30;
+        /* Sharpness */
+        dst->ctl.noise.mode = PROCESSING_MODE_FAST;
+        dst->ctl.noise.strength = 0;
+        dst->ctl.edge.mode = PROCESSING_MODE_FAST;
+        dst->ctl.edge.strength = 0;
+        break;
+
+    case AA_SCENE_MODE_CANDLELIGHT:
+        dst->ctl.aa.mode = AA_CONTROL_AUTO;
+        /* ISO */
+        dst->ctl.aa.isoMode = AA_ISOMODE_AUTO;
+        dst->ctl.aa.isoValue = 0;
+        /* Metering */
+        dst_ext->metering_mode = AA_AEMODE_CENTER;
+        /* EV */
+        /* AWB */
+        dst->ctl.aa.awbMode = AA_AWBMODE_WB_DAYLIGHT;
+        dst_ext->awb_mode_dm = AA_AWBMODE_WB_DAYLIGHT;
+        /* Saturation */
+        dst->ctl.color.saturation = 3; /* means '0' */
+        /* Flash */
+        if (dst->ctl.aa.aeMode != AA_AEMODE_LOCKED)
+            dst->ctl.aa.aeMode = AA_AEMODE_ON; /* Flash off */
+        /* FPS */
+        dst->ctl.aa.aeTargetFpsRange[0] = 15;
+        dst->ctl.aa.aeTargetFpsRange[1] = 30;
+        /* Sharpness */
+        dst->ctl.noise.mode = PROCESSING_MODE_FAST;
+        dst->ctl.noise.strength = 0;
+        dst->ctl.edge.mode = PROCESSING_MODE_FAST;
+        dst->ctl.edge.strength = 0;
+        break;
+
+    case AA_SCENE_MODE_TEXT:
+        dst->ctl.aa.mode = AA_CONTROL_AUTO;
+        /* ISO */
+        dst->ctl.aa.isoMode = AA_ISOMODE_AUTO;
+        dst->ctl.aa.isoValue = 0;
+        /* Metering */
+        dst_ext->metering_mode = AA_AEMODE_CENTER;
+        /* EV */
+        /* AWB */
+        dst->ctl.aa.awbMode = AA_AWBMODE_WB_AUTO;
+        dst_ext->awb_mode_dm = AA_AWBMODE_WB_AUTO;
+        /* Saturation */
+        dst->ctl.color.saturation = 3; /* means '0' */
+        /* FPS */
+        dst->ctl.aa.aeTargetFpsRange[0] = 15;
+        dst->ctl.aa.aeTargetFpsRange[1] = 30;
+        /* Sharpness */
+        dst->ctl.noise.mode = PROCESSING_MODE_HIGH_QUALITY;
+        dst->ctl.noise.strength = 10; /* means '+2' */
+        dst->ctl.edge.mode = PROCESSING_MODE_FAST;
+        dst->ctl.edge.strength = 0;
         break;
 
     case AA_SCENE_MODE_NIGHT:
+        /* use specific scene mode setting */
         dst->ctl.aa.mode = AA_CONTROL_USE_SCENE_MODE;
-        dst->ctl.aa.aeMode = AA_AEMODE_ON; // AE_LOCK is prohibited
-        dst->ctl.aa.awbMode = AA_AWBMODE_WB_AUTO;
-        dst_ext->awb_mode_dm = AA_AWBMODE_WB_AUTO;
+        /* ISO */
         dst->ctl.aa.isoMode = AA_ISOMODE_AUTO;
         dst->ctl.aa.isoValue = 0;
+        /* Metering */
+        dst_ext->metering_mode = AA_AEMODE_CENTER;
+        /* EV */
+        /* AWB */
+        dst->ctl.aa.awbMode = AA_AWBMODE_WB_AUTO;
+        dst_ext->awb_mode_dm = AA_AWBMODE_WB_AUTO;
+        /* Saturation */
+        dst->ctl.color.saturation = 3; /* means '0' */
+        /* Flash */
+        dst->ctl.aa.aeMode = AA_AEMODE_ON; /* AE_LOCK is prohibited */
+        /* FPS */
         dst->ctl.aa.aeTargetFpsRange[0] = 8;
         dst->ctl.aa.aeTargetFpsRange[1] = 30;
-
+        /* Sharpness */
         dst->ctl.noise.mode = PROCESSING_MODE_FAST;
         dst->ctl.noise.strength = 0;
         dst->ctl.edge.mode = PROCESSING_MODE_FAST;
         dst->ctl.edge.strength = 0;
-
-        dst->ctl.color.saturation = 3; // means '0'
         break;
 
     case AA_SCENE_MODE_FACE_PRIORITY:
         dst->ctl.aa.mode = AA_CONTROL_AUTO;
-        if ((dst->ctl.aa.aeMode != AA_AEMODE_LOCKED) && (dst->ctl.aa.aeMode < AA_AEMODE_ON_AUTO_FLASH))
-            dst->ctl.aa.aeMode = AA_AEMODE_ON;
-        dst->ctl.aa.sceneMode = AA_SCENE_MODE_FACE_PRIORITY;
+        /* ISO */
+        /* Metering */
+        /* EV */
+        /* AWB */
+        /* Saturation */
+        /* Flash */
+        /* Sharpness */
         dst->ctl.noise.mode = PROCESSING_MODE_OFF;
         dst->ctl.noise.strength = 0;
         dst->ctl.edge.mode = PROCESSING_MODE_OFF;
         dst->ctl.edge.strength = 0;
-        dst->ctl.color.saturation = 3; // means '0'
+        dst->ctl.color.saturation = 3; /* means '0' */
+        break;
+
+    case AA_SCENE_MODE_ANTI_SHAKE:
+        /* use specific scene mode setting */
+        dst->ctl.aa.mode = AA_CONTROL_USE_SCENE_MODE;
+        /* FPS */
+        dst->ctl.aa.aeTargetFpsRange[0] = 30;
+        dst->ctl.aa.aeTargetFpsRange[1] = 30;
         break;
 
     default:
         dst->ctl.aa.mode = AA_CONTROL_AUTO;
-        if ((dst->ctl.aa.aeMode != AA_AEMODE_LOCKED) && (dst->ctl.aa.aeMode < AA_AEMODE_ON_AUTO_FLASH))
-            dst->ctl.aa.aeMode = AA_AEMODE_ON;
         dst->ctl.aa.sceneMode = AA_SCENE_MODE_UNSUPPORTED;
+        /* Sharpness */
         dst->ctl.noise.mode = PROCESSING_MODE_OFF;
         dst->ctl.noise.strength = 0;
         dst->ctl.edge.mode = PROCESSING_MODE_OFF;
         dst->ctl.edge.strength = 0;
-        dst->ctl.color.saturation = 3; // means '0'
+        dst->ctl.color.saturation = 3; /* means '0' */
         break;
     }
 
