@@ -573,10 +573,10 @@ status_t ExynosCamera2::constructStaticInfo(camera_metadata_t **info,
             availableSceneModes, sizeof(availableSceneModes));
 
     static const uint8_t availableEffects[] = {
+            ANDROID_CONTROL_EFFECT_OFF,
             ANDROID_CONTROL_EFFECT_MONO,
             ANDROID_CONTROL_EFFECT_NEGATIVE,
             ANDROID_CONTROL_EFFECT_SEPIA,
-            ANDROID_CONTROL_EFFECT_OFF
     };
     ADD_OR_SIZE(ANDROID_CONTROL_AVAILABLE_EFFECTS,
             availableEffects, sizeof(availableEffects));
