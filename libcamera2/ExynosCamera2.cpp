@@ -74,15 +74,15 @@ public:
     // if there's a reasonable number of rows.
     static const nsecs_t kRowReadoutTime;
 
-    static const uint32_t kAvailableSensitivities[5];
+    static const uint32_t kAvailableSensitivities[6];
     static const uint32_t kDefaultSensitivity;
 
 };
 
 
 
-const uint32_t Sensor::kAvailableSensitivities[5] =
-    {50, 100, 200, 400, 800};
+const uint32_t Sensor::kAvailableSensitivities[6] =
+    {0, 50, 100, 200, 400, 800};
 const nsecs_t Sensor::kExposureTimeRange[2] =
     {1000L, 30000000000L} ; // 1 us - 30 sec
 const nsecs_t Sensor::kFrameDurationRange[2] =

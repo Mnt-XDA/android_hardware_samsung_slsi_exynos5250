@@ -143,7 +143,10 @@ status_t MetadataConverter::ToInternalShot(camera_metadata_t * request, struct c
             case ANDROID_SENSOR_SENSITIVITY:
                 if (NO_ERROR != CheckEntryTypeMismatch(&curr_entry, TYPE_INT32, 1))
                     break;
-                dst->ctl.aa.isoMode = AA_ISOMODE_MANUAL;
+                if (curr_entry.data.i32[0] == 0)
+                    dst->ctl.aa.isoMode = AA_ISOMODE_AUTO;
+                else
+                    dst->ctl.aa.isoMode = AA_ISOMODE_MANUAL;
                 dst->ctl.aa.isoValue = curr_entry.data.i32[0];
                 dst->dm.aa.isoValue = curr_entry.data.i32[0];
                 break;
