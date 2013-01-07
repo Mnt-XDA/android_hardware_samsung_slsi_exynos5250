@@ -4127,8 +4127,8 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
                    0);
     pictureFormat = V4L2_PIX_FMT_YUYV;
     pictureFramesize = FRAME_SIZE(V4L2_PIX_2_HAL_PIXEL_FORMAT(pictureFormat), pictureW, pictureH);
-
-    if ((selfStreamParms->width == m_jpegPictureRect.w) && (selfStreamParms->height == m_jpegPictureRect.h)) {
+    if ((selfStreamParms->width == m_jpegPictureRect.w) && (selfStreamParms->height == m_jpegPictureRect.h)
+            && (m_zoomRatio == 1.0f)) {
         ALOGV("(%s): Bypassing Resize and CSC", __FUNCTION__);
 
         jpegRect.w = m_jpegPictureRect.w;
@@ -4204,6 +4204,7 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
 
         jpegBufSize = subParms->svcBuffers[subParms->svcBufIndex].size.extS[0];
         jpegRes = yuv2Jpeg(&m_resizeBuf, &subParms->svcBuffers[subParms->svcBufIndex], &jpegRect);
+        m_resizeBuf = resizeBufInfo;
     } else {
         ALOGE("ERR(%s): m_exynosPictureCSC == NULL", __FUNCTION__);
         jpegRes = false;
@@ -4212,8 +4213,6 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
     if (jpegRes == false) {
         ALOGE("ERR(%s): Jpeg Encode fail", __FUNCTION__);
     } else {
-        m_resizeBuf = resizeBufInfo;
-
         int jpegSize = subParms->svcBuffers[subParms->svcBufIndex].size.s;
         ALOGD("(%s): (%d x %d) jpegbuf size(%d) encoded size(%d)", __FUNCTION__,
             m_jpegPictureRect.w, m_jpegPictureRect.h, jpegBufSize, jpegSize);
