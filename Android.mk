@@ -16,10 +16,14 @@
 
 ifeq ($(TARGET_SOC),exynos5250)
 exynos5250_dirs := \
-	libcamera2 \
 	gralloc \
 	libhwjpeg \
 	mobicore
+
+ifeq ($(PRODUCT_BOARD),smdk5250)
+exynos5250_dirs += \
+	libcamera2
+endif
 
 include $(call all-named-subdir-makefiles,$(exynos5250_dirs))
 
