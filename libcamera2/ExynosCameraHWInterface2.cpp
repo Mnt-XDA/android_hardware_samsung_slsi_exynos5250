@@ -953,7 +953,6 @@ ExynosCameraHWInterface2::ExynosCameraHWInterface2(int cameraId, camera2_device_
             m_zoomRatio(1),
             m_vdisBubbleCnt(0),
             m_vdisDupFrame(0),
-            m_jpegEncodingCount(0),
             m_scpForceSuspended(false),
             m_afState(HAL_AFSTATE_INACTIVE),
             m_afTriggerId(0),
@@ -1025,6 +1024,9 @@ ExynosCameraHWInterface2::ExynosCameraHWInterface2(int cameraId, camera2_device_
         m_sensorThread->Start("SensorThread", PRIORITY_DEFAULT, 0);
         ALOGV("DEBUG(%s): created sensorthread ", __FUNCTION__);
 
+        m_jpegEncThread = new JpegEncThread(this);
+        m_jpegEncThread->Start("JpegEncThread", PRIORITY_DEFAULT, 0);
+
         for (int i = 0 ; i < STREAM_ID_LAST+1 ; i++)
             m_subStreams[i].type =  SUBSTREAM_TYPE_NONE;
         CSC_METHOD cscMethod = CSC_METHOD_HW;
@@ -1090,6 +1092,10 @@ void ExynosCameraHWInterface2::release()
 
     if (m_mainThread != NULL) {
         m_mainThread->release();
+    }
+
+    if (m_jpegEncThread != NULL) {
+        m_jpegEncThread->release();
     }
 
     if (m_exynosPictureCSC)
@@ -1600,9 +1606,10 @@ int ExynosCameraHWInterface2::setFrameQueueDstOps(const camera2_frame_queue_dst_
 int ExynosCameraHWInterface2::getInProgressCount()
 {
     int inProgressCount = m_requestManager->GetNumEntries();
+    int jpegEncodingCount = m_jpegEncThread->getInProgressCount();
     ALOGV("DEBUG(%s): # of dequeued req (%d) jpeg(%d) = (%d)", __FUNCTION__,
-        inProgressCount, m_jpegEncodingCount, (inProgressCount + m_jpegEncodingCount));
-    return (inProgressCount + m_jpegEncodingCount);
+        inProgressCount, jpegEncodingCount, (inProgressCount +jpegEncodingCount));
+    return (inProgressCount + jpegEncodingCount);
 }
 
 int ExynosCameraHWInterface2::flushCapturesInProgress()
@@ -4069,6 +4076,67 @@ void ExynosCameraHWInterface2::m_streamThreadFunc(SignalDrivenThread * self)
 
     return;
 }
+
+void ExynosCameraHWInterface2::m_jpegEncThreadFunc(SignalDrivenThread * self)
+{
+    uint32_t            currentSignal   = self->GetProcessingSignal();
+    JpegEncThread       *selfThread     = (JpegEncThread*)self;
+    substream_parameters_t  *subParms   = &m_subStreams[STREAM_ID_JPEG];
+
+    ALOGV("DEBUG(%s): signal (%x)", __FUNCTION__, currentSignal);
+
+    if (currentSignal & SIGNAL_THREAD_RELEASE) {
+        ALOGV("(%s): START SIGNAL_THREAD_RELEASE", __FUNCTION__);
+
+        ALOGV("(%s): END SIGNAL_THREAD_RELEASE", __FUNCTION__);
+        selfThread->SetSignal(SIGNAL_THREAD_TERMINATE);
+        return;
+    }
+
+    if (currentSignal & SIGNAL_JPEG_START_ENCODING) {
+        ALOGV("(%s): START SIGNAL_JPEG_START_ENCODING", __FUNCTION__);
+        bool jpegRes = false;
+        camera2_jpeg_blob *jpegBlob = NULL;
+        int jpegSize = 0;
+        int jpegBufSize = 0;
+        char *jpegBuffer = NULL;
+        status_t    res;
+
+        jpegBufSize = m_jpegEncParameters.m_jpegBuf.size.extS[0];
+        jpegRes = yuv2Jpeg(&m_jpegEncParameters.m_yuvBuf, &m_jpegEncParameters.m_jpegBuf,
+                        &m_jpegEncParameters.m_rect, &m_jpegEncParameters.m_exifInfo,
+                        m_jpegEncParameters.m_jpegQuality, m_jpegEncParameters.m_thumbQuality);
+
+        if (jpegRes) {
+            jpegSize = m_jpegEncParameters.m_jpegBuf.size.s;
+            ALOGD("(%s): (%d x %d) encoded size(%d)", __FUNCTION__,
+                    m_jpegEncParameters.m_rect.w, m_jpegEncParameters.m_rect.h, jpegSize);
+
+            jpegBuffer = (char*)(m_jpegEncParameters.m_jpegBuf.virt.extP[0]);
+            jpegBlob = (camera2_jpeg_blob*)(&jpegBuffer[jpegBufSize - sizeof(camera2_jpeg_blob)]);
+
+            if (jpegBuffer[jpegSize-1] == 0)
+                jpegSize--;
+            jpegBlob->jpeg_size = jpegSize;
+            jpegBlob->jpeg_blob_id = CAMERA2_JPEG_BLOB_ID;
+            res = subParms->streamOps->enqueue_buffer(subParms->streamOps, m_jpegEncParameters.m_frameTimeStamp,
+                    &subParms->svcBufHandle[m_jpegEncParameters.m_svcBufIndex]);
+
+            ALOGV("DEBUG(%s): enqueue_buffer index(%d) to svc done res(%d)",
+                    __FUNCTION__, m_jpegEncParameters.m_svcBufIndex, res);
+            if (res == 0) {
+                subParms->svcBufStatus[m_jpegEncParameters.m_svcBufIndex] = ON_SERVICE;
+                subParms->numSvcBufsInHal--;
+            } else {
+                subParms->svcBufStatus[m_jpegEncParameters.m_svcBufIndex] = ON_HAL;
+            }
+        }
+        m_jpegEncThread->m_inProgressCount--;
+        ALOGV("(%s): END SIGNAL_JPEG_START_ENCODING", __FUNCTION__);
+    }
+    return;
+}
+
 int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuffer *srcImageBuf, nsecs_t frameTimeStamp)
 {
     Mutex::Autolock lock(m_jpegEncoderLock);
@@ -4084,12 +4152,18 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
     ExynosBuffer resizeBufInfo;
     ExynosRect   m_jpegPictureRect;
     buffer_handle_t * buf = NULL;
-    camera2_jpeg_blob * jpegBlob = NULL;
-    int jpegBufSize = 0;
-    bool needsIonUnmap = false;
-    bool jpegRes = false;
 
-    ALOGV("DEBUG(%s): index(%d)",__FUNCTION__, subParms->svcBufIndex);
+    jpegEnc_parameters_t           jpegEncParms;
+
+    if (subParms->numSvcBufsInHal == 0) {
+        if (m_dequeueSubstreamBuffer(subParms, true) == 0) {
+            ALOGE("(%s): No free svc buffer", __FUNCTION__);
+            return 1;
+        }
+    }
+
+    ALOGV("DEBUG(%s): current svcbuf index(%d), numBufsInHal(%d)", __FUNCTION__,
+            subParms->svcBufIndex, subParms->numSvcBufsInHal);
     for (int i = 0 ; subParms->numSvcBuffers ; i++) {
         if (subParms->svcBufStatus[subParms->svcBufIndex] == ON_HAL) {
             found = true;
@@ -4105,7 +4179,23 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
         return 1;
     }
 
-    m_jpegEncodingCount++;
+    ALOGV("DEBUG(%s): chosen svcbuf index(%d)", __FUNCTION__, subParms->svcBufIndex);
+
+    if ((m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[0] != 0) && (m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[1] != 0)) {
+        mExifInfo.enableThumb = true;
+        if (!m_checkThumbnailSize(m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[0], m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[1])) {
+            /* in the case of unsupported parameter, disable thumbnail */
+            mExifInfo.enableThumb = false;
+        } else {
+            m_thumbNailW = m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[0];
+            m_thumbNailH = m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[1];
+        }
+
+        ALOGV("(%s) m_thumbNailW = %d, m_thumbNailH = %d", __FUNCTION__, m_thumbNailW, m_thumbNailH);
+
+    } else {
+        mExifInfo.enableThumb = false;
+    }
 
     m_getRatioSize(selfStreamParms->width, selfStreamParms->height,
                     m_streamThreads[0]->m_parameters.width, m_streamThreads[0]->m_parameters.height,
@@ -4127,22 +4217,7 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
                    0);
     pictureFormat = V4L2_PIX_FMT_YUYV;
     pictureFramesize = FRAME_SIZE(V4L2_PIX_2_HAL_PIXEL_FORMAT(pictureFormat), pictureW, pictureH);
-    if ((selfStreamParms->width == m_jpegPictureRect.w) && (selfStreamParms->height == m_jpegPictureRect.h)
-            && (m_zoomRatio == 1.0f)) {
-        ALOGV("(%s): Bypassing Resize and CSC", __FUNCTION__);
-
-        jpegRect.w = m_jpegPictureRect.w;
-        jpegRect.h = m_jpegPictureRect.h;
-        jpegRect.colorFormat = V4L2_PIX_FMT_YUYV;
-
-        if (srcImageBuf->virt.extP[0] == 0) {
-            srcImageBuf->virt.extP[0] = (char *)ion_map(srcImageBuf->fd.extFd[0], srcImageBuf->size.extS[0], 0);
-            needsIonUnmap = true;
-        }
-
-        jpegBufSize = subParms->svcBuffers[subParms->svcBufIndex].size.extS[0];
-        jpegRes = yuv2Jpeg(srcImageBuf, &subParms->svcBuffers[subParms->svcBufIndex], &jpegRect);
-    } else if (m_exynosPictureCSC) {
+    if (m_exynosPictureCSC) {
         float zoom_w = 0, zoom_h = 0;
         if (m_zoomRatio == 0)
             m_zoomRatio = 1;
@@ -4202,49 +4277,27 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
                 (unsigned int)subParms->svcBuffers[subParms->svcBufIndex].size.extS[j],
                 (unsigned int)subParms->svcBuffers[subParms->svcBufIndex].virt.extP[j]);
 
-        jpegBufSize = subParms->svcBuffers[subParms->svcBufIndex].size.extS[0];
-        jpegRes = yuv2Jpeg(&m_resizeBuf, &subParms->svcBuffers[subParms->svcBufIndex], &jpegRect);
+        m_setExifChangedAttribute(&mExifInfo, &jpegRect, &m_jpegMetadata);
         m_resizeBuf = resizeBufInfo;
+
+        jpegEncParms.m_yuvBuf = m_resizeBuf;
+        jpegEncParms.m_jpegBuf = subParms->svcBuffers[subParms->svcBufIndex];
+        jpegEncParms.m_rect = jpegRect;
+        memcpy(&jpegEncParms.m_exifInfo, &mExifInfo, sizeof(exif_attribute_t));
+        jpegEncParms.m_jpegQuality = m_jpegMetadata.shot.ctl.jpeg.quality;
+        jpegEncParms.m_thumbQuality = m_jpegMetadata.shot.ctl.jpeg.thumbnailQuality;
+        jpegEncParms.m_frameTimeStamp = frameTimeStamp;
+
+        jpegEncParms.m_svcBufIndex = subParms->svcBufIndex;
+
+        m_jpegEncThread->enqueueEncoding(&jpegEncParms);
     } else {
         ALOGE("ERR(%s): m_exynosPictureCSC == NULL", __FUNCTION__);
-        jpegRes = false;
     }
 
-    if (jpegRes == false) {
-        ALOGE("ERR(%s): Jpeg Encode fail", __FUNCTION__);
-    } else {
-        int jpegSize = subParms->svcBuffers[subParms->svcBufIndex].size.s;
-        ALOGD("(%s): (%d x %d) jpegbuf size(%d) encoded size(%d)", __FUNCTION__,
-            m_jpegPictureRect.w, m_jpegPictureRect.h, jpegBufSize, jpegSize);
-        char * jpegBuffer = (char*)(subParms->svcBuffers[subParms->svcBufIndex].virt.extP[0]);
-        jpegBlob = (camera2_jpeg_blob*)(&jpegBuffer[jpegBufSize - sizeof(camera2_jpeg_blob)]);
 
-        if (jpegBuffer[jpegSize-1] == 0)
-            jpegSize--;
-        jpegBlob->jpeg_size = jpegSize;
-        jpegBlob->jpeg_blob_id = CAMERA2_JPEG_BLOB_ID;
-    }
-
-    if (needsIonUnmap) {
-        ion_unmap(srcImageBuf->virt.extP[0], srcImageBuf->size.extS[0]);
-        needsIonUnmap = false;
-        srcImageBuf->virt.extP[0] = 0;
-    }
-
-    subParms->svcBuffers[subParms->svcBufIndex].size.extS[0] = jpegBufSize;
-    res = subParms->streamOps->enqueue_buffer(subParms->streamOps, frameTimeStamp, &(subParms->svcBufHandle[subParms->svcBufIndex]));
-
-    ALOGV("DEBUG(%s): streamthread[%d] enqueue_buffer index(%d) to svc done res(%d)",
-            __FUNCTION__, selfThread->m_index, subParms->svcBufIndex, res);
-    if (res == 0) {
-        subParms->svcBufStatus[subParms->svcBufIndex] = ON_SERVICE;
-        subParms->numSvcBufsInHal--;
-    }
-    else {
-        subParms->svcBufStatus[subParms->svcBufIndex] = ON_HAL;
-    }
     m_dequeueSubstreamBuffer(subParms, false);
-    m_jpegEncodingCount--;
+
     return 0;
 }
 
@@ -4522,9 +4575,10 @@ int ExynosCameraHWInterface2::m_dequeueSubstreamBuffer(substream_parameters_t  *
     buffer_handle_t * buf = NULL;
     int dequeuedCount = 0;
 
-    while (subParms->numSvcBufsInHal <= subParms->minUndequedBuffer) {
-        ALOGV("DEBUG(%s): substream(%d) currentBuf#(%d)", __FUNCTION__ , subParms->type, subParms->numSvcBufsInHal);
+    ALOGV("DEBUG(%s): START substream(%d) currentBuf#(%d) index(%d)", __FUNCTION__,
+                subParms->type, subParms->numSvcBufsInHal, subParms->svcBufIndex);
 
+    while (subParms->numSvcBufsInHal <= subParms->minUndequedBuffer) {
         res = subParms->streamOps->dequeue_buffer(subParms->streamOps, &buf);
         if (res != NO_ERROR || buf == NULL) {
             ALOGV("DEBUG(%s): substream(%d) dequeue_buffer fail res(%d)",__FUNCTION__ , subParms->type, res);
@@ -4557,12 +4611,14 @@ int ExynosCameraHWInterface2::m_dequeueSubstreamBuffer(substream_parameters_t  *
         if (dequeueOnlyOne)
             break;
     }
+    ALOGV("DEBUG(%s): END substream(%d) currentBuf#(%d) index(%d)", __FUNCTION__,
+                subParms->type, subParms->numSvcBufsInHal, subParms->svcBufIndex);
     return dequeuedCount;
 }
 
-bool ExynosCameraHWInterface2::yuv2Jpeg(ExynosBuffer *yuvBuf,
-                            ExynosBuffer *jpegBuf,
-                            ExynosRect *rect)
+bool ExynosCameraHWInterface2::yuv2Jpeg(ExynosBuffer *yuvBuf, ExynosBuffer *jpegBuf,
+                                        ExynosRect *rect, exif_attribute_t *exifInfo,
+                                        int jpegQuality, int thumbQuality)
 {
     unsigned char *addr;
 
@@ -4577,7 +4633,7 @@ bool ExynosCameraHWInterface2::yuv2Jpeg(ExynosBuffer *yuvBuf,
         goto jpeg_encode_done;
     }
 
-    if (jpegEnc.setQuality(m_jpegMetadata.shot.ctl.jpeg.quality)) {
+    if (jpegEnc.setQuality(jpegQuality)) {
         ALOGE("ERR(%s):jpegEnc.setQuality() fail", __FUNCTION__);
         goto jpeg_encode_done;
     }
@@ -4598,34 +4654,17 @@ bool ExynosCameraHWInterface2::yuv2Jpeg(ExynosBuffer *yuvBuf,
         goto jpeg_encode_done;
     }
 
-    if((m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[0] != 0) && (m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[1] != 0)) {
-        mExifInfo.enableThumb = true;
-        if(!m_checkThumbnailSize(m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[0], m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[1])) {
-            // in the case of unsupported parameter, disable thumbnail
-            mExifInfo.enableThumb = false;
-        } else {
-            m_thumbNailW = m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[0];
-            m_thumbNailH = m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[1];
-        }
-
-        ALOGV("(%s) m_thumbNailW = %d, m_thumbNailH = %d", __FUNCTION__, m_thumbNailW, m_thumbNailH);
-
-    } else {
-        mExifInfo.enableThumb = false;
-    }
-
-    if (jpegEnc.setThumbnailSize(m_thumbNailW, m_thumbNailH)) {
-        ALOGE("ERR(%s):jpegEnc.setThumbnailSize(%d, %d) fail", __FUNCTION__, m_thumbNailH, m_thumbNailH);
+    if (jpegEnc.setThumbnailSize(exifInfo->widthThumb, exifInfo->heightThumb)) {
+        ALOGE("ERR(%s):jpegEnc.setThumbnailSize(%d, %d) fail", __FUNCTION__,
+            exifInfo->widthThumb, exifInfo->heightThumb);
         goto jpeg_encode_done;
     }
 
-    ALOGV("(%s):jpegEnc.setThumbnailSize(%d, %d) ", __FUNCTION__, m_thumbNailW, m_thumbNailW);
-    if (jpegEnc.setThumbnailQuality(m_jpegMetadata.shot.ctl.jpeg.thumbnailQuality)) {
+    if (jpegEnc.setThumbnailQuality(thumbQuality)) {
         ALOGE("ERR(%s):jpegEnc.setThumbnailQuality fail", __FUNCTION__);
         goto jpeg_encode_done;
     }
 
-    m_setExifChangedAttribute(&mExifInfo, rect, &m_jpegMetadata);
     ALOGV("DEBUG(%s):calling jpegEnc.setInBuf() yuvSize(%d)", __FUNCTION__, *yuvSize);
     if (jpegEnc.setInBuf((int *)&(yuvBuf->fd.fd), &(yuvBuf->virt.p), (int *)yuvSize)) {
         ALOGE("ERR(%s):jpegEnc.setInBuf() fail", __FUNCTION__);
@@ -4641,7 +4680,7 @@ bool ExynosCameraHWInterface2::yuv2Jpeg(ExynosBuffer *yuvBuf,
         goto jpeg_encode_done;
     }
 
-    if ((res = jpegEnc.encode((int *)&jpegBuf->size.s, &mExifInfo)) < 0 ) {
+    if ((res = jpegEnc.encode((int *)&jpegBuf->size.s, exifInfo)) < 0 ) {
         ALOGE("ERR(%s):jpegEnc.encode() fail ret(%d)", __FUNCTION__, res);
         goto jpeg_encode_done;
     }
@@ -5931,6 +5970,35 @@ status_t ExynosCameraHWInterface2::StreamThread::detachSubStream(int stream_id)
     m_attachedSubStreams[index].priority = 0;
     m_numRegisteredStream--;
     return NO_ERROR;
+}
+
+ExynosCameraHWInterface2::JpegEncThread::JpegEncThread()
+{
+    ALOGV("(%s):", __FUNCTION__);
+}
+
+void ExynosCameraHWInterface2::JpegEncThread::release()
+{
+    ALOGV("(%s):", __func__);
+    SetSignal(SIGNAL_THREAD_RELEASE);
+}
+
+uint8_t ExynosCameraHWInterface2::JpegEncThread::getInProgressCount()
+{
+    return m_inProgressCount;
+}
+
+void ExynosCameraHWInterface2::JpegEncThread::enqueueEncoding(jpegEnc_parameters_t *parameters)
+{
+    /* temporary code before implementing work queue */
+    ALOGV("(%s): START - inProgressCount = %d", __FUNCTION__, m_inProgressCount);
+    while (m_inProgressCount)
+        usleep(1000);
+
+    m_inProgressCount++;
+    ALOGV("(%s): updated inProgressCount = %d", __FUNCTION__, m_inProgressCount);
+    memcpy(&(mHardware->m_jpegEncParameters), parameters, sizeof(jpegEnc_parameters_t));
+    SetSignal(SIGNAL_JPEG_START_ENCODING);
 }
 
 int ExynosCameraHWInterface2::createIonClient(ion_client ionClient)

@@ -79,6 +79,8 @@ namespace android {
 #define SIGNAL_MAIN_STREAM_OUTPUT_DONE          (SIGNAL_THREAD_COMMON_LAST<<3)
 #define SIGNAL_SENSOR_START_REQ_PROCESSING      (SIGNAL_THREAD_COMMON_LAST<<4)
 
+#define SIGNAL_JPEG_START_ENCODING              (SIGNAL_THREAD_COMMON_LAST<<5)
+
 #define SIGNAL_THREAD_RELEASE                   (SIGNAL_THREAD_COMMON_LAST<<8)
 
 #define SIGNAL_STREAM_REPROCESSING_START        (SIGNAL_THREAD_COMMON_LAST<<14)
@@ -439,6 +441,17 @@ typedef struct substream_entry {
     int                     streamId;
 } substream_entry_t;
 
+typedef struct jpegEnc_parameters {
+    ExynosBuffer        m_yuvBuf;
+    ExynosBuffer        m_jpegBuf;
+    ExynosRect          m_rect;
+    exif_attribute_t    m_exifInfo;
+    int                 m_jpegQuality;
+    int                 m_thumbQuality;
+    nsecs_t             m_frameTimeStamp;
+    int                 m_svcBufIndex;
+} jpegEnc_parameters_t;
+
 class ExynosCameraHWInterface2 : public virtual RefBase {
 public:
     ExynosCameraHWInterface2(int cameraId, camera2_device_t *dev, ExynosCamera2 * camera, int *openInvalid);
@@ -533,12 +546,31 @@ class MainThread : public SignalDrivenThread {
         int                             m_numRegisteredStream;
      };
 
+    class JpegEncThread : public SignalDrivenThread {
+        ExynosCameraHWInterface2 *mHardware;
+    public:
+        JpegEncThread(ExynosCameraHWInterface2 *hw):
+            SignalDrivenThread(),
+            mHardware(hw),
+            m_inProgressCount(0) { }
+        JpegEncThread();
+        void threadFunctionInternal() {
+            mHardware->m_jpegEncThreadFunc(this);
+            return;
+        }
+        void            release(void);
+        uint8_t         getInProgressCount();
+        void            enqueueEncoding(jpegEnc_parameters_t *parameters);
+
+        uint8_t         m_inProgressCount;
+
+    };
+
     sp<MainThread>      m_mainThread;
     sp<SensorThread>    m_sensorThread;
     sp<StreamThread>    m_streamThreads[NUM_MAX_STREAM_THREAD];
+    sp<JpegEncThread>   m_jpegEncThread;
     substream_parameters_t  m_subStreams[STREAM_ID_LAST+1];
-
-
 
     RequestManager      *m_requestManager;
     BayerBufManager     *m_BayerManager;
@@ -547,6 +579,8 @@ class MainThread : public SignalDrivenThread {
     void                m_mainThreadFunc(SignalDrivenThread * self);
     void                m_sensorThreadFunc(SignalDrivenThread * self);
     void                m_streamThreadFunc(SignalDrivenThread * self);
+    void                m_jpegEncThreadFunc(SignalDrivenThread * self);
+
     void                m_streamThreadInitialize(SignalDrivenThread * self);
 
     void                m_streamFunc_direct(SignalDrivenThread *self);
@@ -578,9 +612,8 @@ class MainThread : public SignalDrivenThread {
     int             m_dequeueSubstreamBuffer(substream_parameters_t  *subParms, bool dequeueOnlyOne);
     bool            dumpImage(struct ExynosBuffer *buffer, char *filename, int num, char *type);
     bool            m_checkThumbnailSize(int w, int h);
-    bool            yuv2Jpeg(ExynosBuffer *yuvBuf,
-                            ExynosBuffer *jpegBuf,
-                            ExynosRect *rect);
+    bool            yuv2Jpeg(ExynosBuffer *yuvBuf, ExynosBuffer *jpegBuf, ExynosRect *rect,
+                                exif_attribute_t *exifInfo, int jpegQuality, int thumbQuality);
     int             InitializeISPChain();
     void            StartISP();
     void            StartSCCThread(bool threadExists);
@@ -659,7 +692,6 @@ class MainThread : public SignalDrivenThread {
 
     mutable Mutex                       m_qbufLock;
     mutable Mutex                       m_jpegEncoderLock;
-    int                                 m_jpegEncodingCount;
     mutable Mutex                       m_afModeTriggerLock;
 
     bool                                m_scpForceSuspended;
@@ -687,6 +719,8 @@ class MainThread : public SignalDrivenThread {
     int                                 m_reprocessOutputStreamId;
     int                                 m_reprocessingFrameCnt;
     ctl_request_info_t        m_ctlInfo;
+
+     jpegEnc_parameters_t           m_jpegEncParameters;
 };
 
 }; // namespace android
