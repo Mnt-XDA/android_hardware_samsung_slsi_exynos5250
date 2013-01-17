@@ -967,9 +967,7 @@ ExynosCameraHWInterface2::ExynosCameraHWInterface2(int cameraId, camera2_device_
             m_scpOutputImageCnt(0),
             m_nightCaptureCnt(0),
             m_nightCaptureFrameCnt(0),
-            m_lastSceneMode(0),
-            m_thumbNailW(160),
-            m_thumbNailH(120)
+            m_lastSceneMode(0)
 {
     ALOGD("(%s): ENTER", __FUNCTION__);
     int ret = 0;
@@ -4181,22 +4179,6 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
 
     ALOGV("DEBUG(%s): chosen svcbuf index(%d)", __FUNCTION__, subParms->svcBufIndex);
 
-    if ((m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[0] != 0) && (m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[1] != 0)) {
-        mExifInfo.enableThumb = true;
-        if (!m_checkThumbnailSize(m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[0], m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[1])) {
-            /* in the case of unsupported parameter, disable thumbnail */
-            mExifInfo.enableThumb = false;
-        } else {
-            m_thumbNailW = m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[0];
-            m_thumbNailH = m_jpegMetadata.shot.ctl.jpeg.thumbnailSize[1];
-        }
-
-        ALOGV("(%s) m_thumbNailW = %d, m_thumbNailH = %d", __FUNCTION__, m_thumbNailW, m_thumbNailH);
-
-    } else {
-        mExifInfo.enableThumb = false;
-    }
-
     m_getRatioSize(selfStreamParms->width, selfStreamParms->height,
                     m_streamThreads[0]->m_parameters.width, m_streamThreads[0]->m_parameters.height,
                     &srcCropX, &srcCropY,
@@ -4509,32 +4491,6 @@ int ExynosCameraHWInterface2::m_prvcbCreator(StreamThread *selfThread, ExynosBuf
     }
     m_dequeueSubstreamBuffer(subParms, false);
     return 0;
-}
-
-bool ExynosCameraHWInterface2::m_checkThumbnailSize(int w, int h)
-{
-    int sizeOfSupportList;
-
-    //REAR Camera
-    if(this->getCameraId() == 0) {
-        sizeOfSupportList = sizeof(SUPPORT_THUMBNAIL_REAR_SIZE) / (sizeof(int)*2);
-
-        for(int i = 0; i < sizeOfSupportList; i++) {
-            if((SUPPORT_THUMBNAIL_REAR_SIZE[i][0] == w) &&(SUPPORT_THUMBNAIL_REAR_SIZE[i][1] == h))
-                return true;
-        }
-
-    }
-    else {
-        sizeOfSupportList = sizeof(SUPPORT_THUMBNAIL_FRONT_SIZE) / (sizeof(int)*2);
-
-        for(int i = 0; i < sizeOfSupportList; i++) {
-            if((SUPPORT_THUMBNAIL_FRONT_SIZE[i][0] == w) &&(SUPPORT_THUMBNAIL_FRONT_SIZE[i][1] == h))
-                return true;
-        }
-    }
-
-    return false;
 }
 
 bool ExynosCameraHWInterface2::dumpImage(struct ExynosBuffer *buffer, char *filename, int num, char *type)
@@ -5867,8 +5823,15 @@ void ExynosCameraHWInterface2::m_setExifChangedAttribute(exif_attribute_t *exifI
     }
 
     //2 1th IFD TIFF Tags
-    exifInfo->widthThumb = ctl->jpeg.thumbnailSize[0];
-    exifInfo->heightThumb = ctl->jpeg.thumbnailSize[1];
+    mExifInfo.widthThumb  = 0;
+    mExifInfo.heightThumb = 0;
+    mExifInfo.enableThumb = false;
+    if (m_camera2->isSupportedThumbnailResolution(ctl->jpeg.thumbnailSize[0], ctl->jpeg.thumbnailSize[1])) {
+        mExifInfo.enableThumb = true;
+        mExifInfo.widthThumb  = ctl->jpeg.thumbnailSize[0];
+        mExifInfo.heightThumb = ctl->jpeg.thumbnailSize[1];
+        ALOGV("(%s) widthThumb = %d, heightThumb = %d", __FUNCTION__, mExifInfo.widthThumb, mExifInfo.heightThumb);
+    }
 }
 
 ExynosCameraHWInterface2::MainThread::~MainThread()

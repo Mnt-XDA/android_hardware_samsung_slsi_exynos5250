@@ -149,6 +149,13 @@ const uint32_t jpegResolutionS5K4E5[] =
      320,  240,
 };
 
+const uint32_t thumbnailResolutionS5K4E5[] =
+{
+     160,  120,
+     160,   90,
+     144,   96,
+};
+
 const uint8_t availableAfModesS5K4E5[] =
 {
     ANDROID_CONTROL_AF_OFF,
@@ -235,6 +242,8 @@ ExynosCamera2InfoS5K4E5::ExynosCamera2InfoS5K4E5()
     scalerResolutions   = scalerResolutionS5K4E5;
     numJpegResolution   = ARRAY_SIZE(jpegResolutionS5K4E5)/2;
     jpegResolutions     = jpegResolutionS5K4E5;
+    numThumbnailResolution   = ARRAY_SIZE(thumbnailResolutionS5K4E5)/2;
+    thumbnailResolutions     = thumbnailResolutionS5K4E5;
     minFocusDistance    = 0.1f;
     focalLength         = 3.43f;
     aperture            = 2.7f;
@@ -283,6 +292,14 @@ const uint32_t jpegResolutionS5K6A3[] =
     1152,  864,
      640,  480,
      320,  240,
+};
+
+const uint32_t thumbnailResolutionS5K6A3[] =
+{
+     160,  120,
+     160,  160,
+     160,   90,
+     144,   96,
 };
 
 const uint8_t availableAfModesS5K6A3[] =
@@ -366,6 +383,8 @@ ExynosCamera2InfoS5K6A3::ExynosCamera2InfoS5K6A3()
     scalerResolutions   = scalerResolutionS5K6A3;
     numJpegResolution   = ARRAY_SIZE(jpegResolutionS5K6A3)/2;
     jpegResolutions     = jpegResolutionS5K6A3;
+    numThumbnailResolution   = ARRAY_SIZE(thumbnailResolutionS5K6A3)/2;
+    thumbnailResolutions     = thumbnailResolutionS5K6A3;
     minFocusDistance    = 0.0f;
     focalLength         = 2.73f;
     aperture            = 2.8f;
@@ -438,6 +457,17 @@ bool ExynosCamera2::isSupportedJpegResolution(uint32_t width, uint32_t height)
                 && m_curCameraInfo->jpegResolutions[2*i+1] == height) {
             return true;
         }
+    }
+    return false;
+}
+
+bool ExynosCamera2::isSupportedThumbnailResolution(uint32_t width, uint32_t height)
+{
+    int i;
+    for (i = 0; i < m_curCameraInfo->numThumbnailResolution; i++) {
+        if (m_curCameraInfo->thumbnailResolutions[2*i] == width
+                && m_curCameraInfo->thumbnailResolutions[2*i+1] == height)
+            return true;
     }
     return false;
 }
@@ -597,16 +627,9 @@ status_t ExynosCamera2::constructStaticInfo(camera_metadata_t **info,
 
     // android.jpeg
 
-    static const int32_t jpegThumbnailSizes[] = {
-            160, 120,
-            160, 160,
-            160, 90,
-            144, 96,
-              0, 0
-    };
-
     ADD_OR_SIZE(ANDROID_JPEG_AVAILABLE_THUMBNAIL_SIZES,
-            jpegThumbnailSizes, sizeof(jpegThumbnailSizes)/sizeof(int32_t));
+        m_curCameraInfo->thumbnailResolutions,
+        (m_curCameraInfo->numThumbnailResolution) * 2);
 
     static const int32_t jpegMaxSize = 10 * 1024 * 1024;
     ADD_OR_SIZE(ANDROID_JPEG_MAX_SIZE, &jpegMaxSize, 1);

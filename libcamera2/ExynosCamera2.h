@@ -39,24 +39,26 @@ namespace android {
 struct ExynosCamera2Info
 {
 public:
-    uint32_t     sensorW;
-    uint32_t     sensorH;
-    uint32_t     sensorRawW;
-    uint32_t     sensorRawH;
-    int         numScalerResolution;
-    const uint32_t     *scalerResolutions;
-    int         numJpegResolution;
-    const uint32_t     *jpegResolutions;
-    float       minFocusDistance;
-    float       focalLength;
-    float       aperture;
-    float       fnumber;
-    const uint8_t       *availableAfModes;
-    const uint8_t       *sceneModeOverrides;
-    const uint8_t       *availableAeModes;
-    int         numAvailableAfModes;
-    int         numSceneModeOverrides;
-    int         numAvailableAeModes;
+    uint32_t        sensorW;
+    uint32_t        sensorH;
+    uint32_t        sensorRawW;
+    uint32_t        sensorRawH;
+    int             numScalerResolution;
+    const uint32_t  *scalerResolutions;
+    int             numJpegResolution;
+    const uint32_t  *jpegResolutions;
+    int             numThumbnailResolution;
+    const uint32_t  *thumbnailResolutions;
+    float           minFocusDistance;
+    float           focalLength;
+    float           aperture;
+    float           fnumber;
+    const uint8_t   *availableAfModes;
+    const uint8_t   *sceneModeOverrides;
+    const uint8_t   *availableAeModes;
+    int             numAvailableAfModes;
+    int             numSceneModeOverrides;
+    int             numAvailableAeModes;
 
     /* FD information */
     int32_t    maxFaceCount;
@@ -90,6 +92,7 @@ public:
 
     bool isSupportedResolution(uint32_t width, uint32_t height);
     bool isSupportedJpegResolution(uint32_t width, uint32_t height);
+    bool isSupportedThumbnailResolution(uint32_t width, uint32_t height);
 
     status_t constructStaticInfo(camera_metadata_t **info,
         int cameraId, bool sizeRequest);

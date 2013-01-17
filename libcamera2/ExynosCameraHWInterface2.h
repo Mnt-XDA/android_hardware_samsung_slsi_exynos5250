@@ -151,21 +151,6 @@ enum is_subscenario_id {
 	ISS_SUB_END
 };
 
-int SUPPORT_THUMBNAIL_REAR_SIZE[][2] =
-{
-    {160, 120},
-    {160, 90},
-    {144, 96}
-};
-
-int SUPPORT_THUMBNAIL_FRONT_SIZE[][2] =
-{
-    {160, 120},
-    {160, 160},
-    {160, 90},
-    {144, 96}
-};
-
 enum is_set_flash_command_state {
     IS_FLASH_STATE_NONE = 0,
     IS_FLASH_STATE_ON = 1,
@@ -611,7 +596,6 @@ class MainThread : public SignalDrivenThread {
     void            DumpInfoWithShot(struct camera2_shot_ext * shot_ext);
     int             m_dequeueSubstreamBuffer(substream_parameters_t  *subParms, bool dequeueOnlyOne);
     bool            dumpImage(struct ExynosBuffer *buffer, char *filename, int num, char *type);
-    bool            m_checkThumbnailSize(int w, int h);
     bool            yuv2Jpeg(ExynosBuffer *yuvBuf, ExynosBuffer *jpegBuf, ExynosRect *rect,
                                 exif_attribute_t *exifInfo, int jpegQuality, int thumbQuality);
     int             InitializeISPChain();
@@ -712,8 +696,6 @@ class MainThread : public SignalDrivenThread {
     int                                 m_nightCaptureCnt;
     int                                 m_nightCaptureFrameCnt;
     int                                 m_lastSceneMode;
-    int                                 m_thumbNailW;
-    int                                 m_thumbNailH;
     int                                 m_reprocessStreamId;
     const camera2_stream_in_ops_t *     m_reprocessOps;
     int                                 m_reprocessOutputStreamId;
