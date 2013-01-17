@@ -4243,46 +4243,7 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
     else {
         subParms->svcBufStatus[subParms->svcBufIndex] = ON_HAL;
     }
-
-    while (subParms->numSvcBufsInHal <= subParms->minUndequedBuffer)
-    {
-        bool found = false;
-        int checkingIndex = 0;
-
-        ALOGV("DEBUG(%s): jpeg currentBuf#(%d)", __FUNCTION__ , subParms->numSvcBufsInHal);
-
-        res = subParms->streamOps->dequeue_buffer(subParms->streamOps, &buf);
-        if (res != NO_ERROR || buf == NULL) {
-            ALOGV("DEBUG(%s): jpeg stream(%d) dequeue_buffer fail res(%d)",__FUNCTION__ , selfThread->m_index,  res);
-            break;
-        }
-        const private_handle_t *priv_handle = reinterpret_cast<const private_handle_t *>(*buf);
-        subParms->numSvcBufsInHal ++;
-        ALOGV("DEBUG(%s): jpeg got buf(%x) numBufInHal(%d) version(%d), numFds(%d), numInts(%d)", __FUNCTION__, (uint32_t)(*buf),
-           subParms->numSvcBufsInHal, ((native_handle_t*)(*buf))->version, ((native_handle_t*)(*buf))->numFds, ((native_handle_t*)(*buf))->numInts);
-
-
-        for (checkingIndex = 0; checkingIndex < subParms->numSvcBuffers ; checkingIndex++) {
-            if (priv_handle->fd == subParms->svcBuffers[checkingIndex].fd.extFd[0] ) {
-                found = true;
-                break;
-            }
-        }
-        ALOGV("DEBUG(%s): jpeg dequeueed_buffer found index(%d)", __FUNCTION__, found);
-
-        if (!found) {
-             break;
-        }
-
-        subParms->svcBufIndex = checkingIndex;
-        if (subParms->svcBufStatus[subParms->svcBufIndex] == ON_SERVICE) {
-            subParms->svcBufStatus[subParms->svcBufIndex] = ON_HAL;
-        }
-        else {
-            ALOGV("DEBUG(%s): jpeg bufstatus abnormal [%d]  status = %d", __FUNCTION__,
-                subParms->svcBufIndex,  subParms->svcBufStatus[subParms->svcBufIndex]);
-        }
-    }
+    m_dequeueSubstreamBuffer(subParms, false);
     m_jpegEncodingCount--;
     return 0;
 }
@@ -4366,45 +4327,7 @@ int ExynosCameraHWInterface2::m_recordCreator(StreamThread *selfThread, ExynosBu
     else {
         subParms->svcBufStatus[subParms->svcBufIndex] = ON_HAL;
     }
-
-    while (subParms->numSvcBufsInHal <= subParms->minUndequedBuffer)
-    {
-        bool found = false;
-        int checkingIndex = 0;
-
-        ALOGV("DEBUG(%s): record currentBuf#(%d)", __FUNCTION__ , subParms->numSvcBufsInHal);
-
-        res = subParms->streamOps->dequeue_buffer(subParms->streamOps, &buf);
-        if (res != NO_ERROR || buf == NULL) {
-            ALOGV("DEBUG(%s): record stream(%d) dequeue_buffer fail res(%d)",__FUNCTION__ , selfThread->m_index,  res);
-            break;
-        }
-        const private_handle_t *priv_handle = reinterpret_cast<const private_handle_t *>(*buf);
-        subParms->numSvcBufsInHal ++;
-        ALOGV("DEBUG(%s): record got buf(%x) numBufInHal(%d) version(%d), numFds(%d), numInts(%d)", __FUNCTION__, (uint32_t)(*buf),
-           subParms->numSvcBufsInHal, ((native_handle_t*)(*buf))->version, ((native_handle_t*)(*buf))->numFds, ((native_handle_t*)(*buf))->numInts);
-
-        for (checkingIndex = 0; checkingIndex < subParms->numSvcBuffers ; checkingIndex++) {
-            if (priv_handle->fd == subParms->svcBuffers[checkingIndex].fd.extFd[0] ) {
-                found = true;
-                break;
-            }
-        }
-        ALOGV("DEBUG(%s): record dequeueed_buffer found(%d) index = %d", __FUNCTION__, found, checkingIndex);
-
-        if (!found) {
-             break;
-        }
-
-        subParms->svcBufIndex = checkingIndex;
-        if (subParms->svcBufStatus[subParms->svcBufIndex] == ON_SERVICE) {
-            subParms->svcBufStatus[subParms->svcBufIndex] = ON_HAL;
-        }
-        else {
-            ALOGV("DEBUG(%s): record bufstatus abnormal [%d]  status = %d", __FUNCTION__,
-                subParms->svcBufIndex,  subParms->svcBufStatus[subParms->svcBufIndex]);
-        }
-    }
+    m_dequeueSubstreamBuffer(subParms, false);
     return 0;
 }
 
@@ -4531,46 +4454,7 @@ int ExynosCameraHWInterface2::m_prvcbCreator(StreamThread *selfThread, ExynosBuf
     else {
         subParms->svcBufStatus[subParms->svcBufIndex] = ON_HAL;
     }
-
-    while (subParms->numSvcBufsInHal <= subParms->minUndequedBuffer)
-    {
-        bool found = false;
-        int checkingIndex = 0;
-
-        ALOGV("DEBUG(%s): prvcb currentBuf#(%d)", __FUNCTION__ , subParms->numSvcBufsInHal);
-
-        res = subParms->streamOps->dequeue_buffer(subParms->streamOps, &buf);
-        if (res != NO_ERROR || buf == NULL) {
-            ALOGV("DEBUG(%s): prvcb stream(%d) dequeue_buffer fail res(%d)",__FUNCTION__ , selfThread->m_index,  res);
-            break;
-        }
-        const private_handle_t *priv_handle = reinterpret_cast<const private_handle_t *>(*buf);
-        subParms->numSvcBufsInHal ++;
-        ALOGV("DEBUG(%s): prvcb got buf(%x) numBufInHal(%d) version(%d), numFds(%d), numInts(%d)", __FUNCTION__, (uint32_t)(*buf),
-           subParms->numSvcBufsInHal, ((native_handle_t*)(*buf))->version, ((native_handle_t*)(*buf))->numFds, ((native_handle_t*)(*buf))->numInts);
-
-
-        for (checkingIndex = 0; checkingIndex < subParms->numSvcBuffers ; checkingIndex++) {
-            if (priv_handle->fd == subParms->svcBuffers[checkingIndex].fd.extFd[0] ) {
-                found = true;
-                break;
-            }
-        }
-        ALOGV("DEBUG(%s): prvcb dequeueed_buffer found(%d) index = %d", __FUNCTION__, found, checkingIndex);
-
-        if (!found) {
-             break;
-        }
-
-        subParms->svcBufIndex = checkingIndex;
-        if (subParms->svcBufStatus[subParms->svcBufIndex] == ON_SERVICE) {
-            subParms->svcBufStatus[subParms->svcBufIndex] = ON_HAL;
-        }
-        else {
-            ALOGV("DEBUG(%s): prvcb bufstatus abnormal [%d]  status = %d", __FUNCTION__,
-                subParms->svcBufIndex,  subParms->svcBufStatus[subParms->svcBufIndex]);
-        }
-    }
+    m_dequeueSubstreamBuffer(subParms, false);
     return 0;
 }
 
@@ -4628,6 +4512,52 @@ bool ExynosCameraHWInterface2::dumpImage(struct ExynosBuffer *buffer, char *file
         fclose(fd);
 
     return true;
+}
+
+int ExynosCameraHWInterface2::m_dequeueSubstreamBuffer(substream_parameters_t  *subParms, bool dequeueOnlyOne)
+{
+    bool found = false;
+    int checkingIndex = 0;
+    status_t    res;
+    buffer_handle_t * buf = NULL;
+    int dequeuedCount = 0;
+
+    while (subParms->numSvcBufsInHal <= subParms->minUndequedBuffer) {
+        ALOGV("DEBUG(%s): substream(%d) currentBuf#(%d)", __FUNCTION__ , subParms->type, subParms->numSvcBufsInHal);
+
+        res = subParms->streamOps->dequeue_buffer(subParms->streamOps, &buf);
+        if (res != NO_ERROR || buf == NULL) {
+            ALOGV("DEBUG(%s): substream(%d) dequeue_buffer fail res(%d)",__FUNCTION__ , subParms->type, res);
+            break;
+        }
+        const private_handle_t *priv_handle = reinterpret_cast<const private_handle_t *>(*buf);
+        subParms->numSvcBufsInHal++;
+        ALOGV("DEBUG(%s): substream(%d) got buf(%x) numBufInHal(%d) version(%d), numFds(%d), numInts(%d)", __FUNCTION__,
+                (uint32_t)(*buf), subParms->type, subParms->numSvcBufsInHal,
+                ((native_handle_t*)(*buf))->version, ((native_handle_t*)(*buf))->numFds, ((native_handle_t*)(*buf))->numInts);
+
+        for (checkingIndex = 0; checkingIndex < subParms->numSvcBuffers ; checkingIndex++) {
+            if (priv_handle->fd == subParms->svcBuffers[checkingIndex].fd.extFd[0] ) {
+                found = true;
+                break;
+            }
+        }
+        ALOGV("DEBUG(%s): substream(%d) dequeueed_buffer found(%d) index(%d)", __FUNCTION__, subParms->type, found, checkingIndex);
+
+        if (!found)
+             break;
+
+        subParms->svcBufIndex = checkingIndex;
+        if (subParms->svcBufStatus[subParms->svcBufIndex] == ON_SERVICE)
+            subParms->svcBufStatus[subParms->svcBufIndex] = ON_HAL;
+        else
+            ALOGV("DEBUG(%s): substream(%d) bufstatus abnormal [%d]  status = %d", __FUNCTION__, subParms->type,
+                subParms->svcBufIndex,  subParms->svcBufStatus[subParms->svcBufIndex]);
+        dequeuedCount++;
+        if (dequeueOnlyOne)
+            break;
+    }
+    return dequeuedCount;
 }
 
 bool ExynosCameraHWInterface2::yuv2Jpeg(ExynosBuffer *yuvBuf,
