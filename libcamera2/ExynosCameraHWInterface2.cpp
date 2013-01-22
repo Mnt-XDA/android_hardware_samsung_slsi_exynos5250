@@ -460,10 +460,12 @@ int RequestManager::MarkProcessingRequest(ExynosBuffer* buf)
         return -1;
     }
 
+    shot_ext = (struct camera2_shot_ext *)buf->virt.extP[1];
     if ((m_entryProcessingIndex == m_entryInsertionIndex)
-        && (entries[m_entryProcessingIndex].status == REQUESTED || entries[m_entryProcessingIndex].status == CAPTURED)) {
+        && (entries[m_entryProcessingIndex].status == REQUESTED || entries[m_entryProcessingIndex].status == CAPTURED || entries[m_entryProcessingIndex].status == COMPLETED)) {
         ALOGV("## MarkProcReq skipping(request underrun) -  num(%d), insert(%d), processing(%d), frame(%d)",
          m_numOfEntries,m_entryInsertionIndex,m_entryProcessingIndex, m_entryFrameOutputIndex);
+        shot_ext->isReprocessing = 0;
         return -1;
     }
 
@@ -482,8 +484,6 @@ int RequestManager::MarkProcessingRequest(ExynosBuffer* buf)
 
     newEntry->status = REQUESTED;
 
-    shot_ext = (struct camera2_shot_ext *)buf->virt.extP[1];
-
     memset(shot_ext, 0x00, sizeof(struct camera2_shot_ext));
     shot_ext->shot.ctl.request.frameCount = request_shot->shot.ctl.request.frameCount;
     shot_ext->request_sensor = 1;
@@ -492,7 +492,7 @@ int RequestManager::MarkProcessingRequest(ExynosBuffer* buf)
     shot_ext->fd_bypass = 1;
     shot_ext->setfile = 0;
 
-    targetStreamIndex = newEntry->internal_shot.shot.ctl.request.outputStreams[0];
+    targetStreamIndex = request_shot->shot.ctl.request.outputStreams[0];
     shot_ext->shot.ctl.request.outputStreams[0] = targetStreamIndex;
     if (targetStreamIndex & MASK_OUTPUT_SCP)
         shot_ext->request_scp = 1;
@@ -516,10 +516,17 @@ int RequestManager::MarkProcessingRequest(ExynosBuffer* buf)
     shot_ext->shot.ctl.sensor.frameDuration = 33*1000*1000;
     shot_ext->shot.ctl.sensor.sensitivity = 0;
 
+    shot_ext->isReprocessing = request_shot->isReprocessing;
+    shot_ext->reprocessInput = request_shot->reprocessInput;
+    if (shot_ext->isReprocessing) {
+        ALOGE("(%s): reprocess request - framecnt(%d)", __FUNCTION__, shot_ext->shot.ctl.request.frameCount);
+        shot_ext->request_scp = 0;
+        shot_ext->request_scc = 0;
+    }
 
-    shot_ext->shot.ctl.scaler.cropRegion[0] = newEntry->internal_shot.shot.ctl.scaler.cropRegion[0];
-    shot_ext->shot.ctl.scaler.cropRegion[1] = newEntry->internal_shot.shot.ctl.scaler.cropRegion[1];
-    shot_ext->shot.ctl.scaler.cropRegion[2] = newEntry->internal_shot.shot.ctl.scaler.cropRegion[2];
+    shot_ext->shot.ctl.scaler.cropRegion[0] = request_shot->shot.ctl.scaler.cropRegion[0];
+    shot_ext->shot.ctl.scaler.cropRegion[1] = request_shot->shot.ctl.scaler.cropRegion[1];
+    shot_ext->shot.ctl.scaler.cropRegion[2] = request_shot->shot.ctl.scaler.cropRegion[2];
 
     m_entryProcessingIndex = newProcessingIndex;
     return newProcessingIndex;
@@ -3358,16 +3365,13 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
             }
 
             if (shot_ext->isReprocessing) {
-                ALOGV("(%s): Sending signal for Reprocess request", __FUNCTION__);
+                ALOGV("(%s): ISP Qbuf - Reprocess request", __FUNCTION__);
                 m_currentReprocessOutStreams = shot_ext->shot.ctl.request.outputStreams[0];
                 shot_ext->request_scp = 0;
                 shot_ext->request_scc = 0;
-                m_reprocessingFrameCnt = shot_ext->shot.ctl.request.frameCount;
                 m_ctlInfo.flash.m_flashDecisionResult = false;
-                memcpy(&m_jpegMetadata, (void*)(m_requestManager->GetInternalShotExtByFrameCnt(m_reprocessingFrameCnt)),
-                    sizeof(struct camera2_shot_ext));
-                m_streamThreads[1]->SetSignal(SIGNAL_STREAM_REPROCESSING_START);
                 m_ctlInfo.flash.m_flashEnableFlg = false;
+                shot_ext->isReprocessing = 0;
             }
 
             if (m_ctlInfo.flash.m_flashEnableFlg) {
@@ -3551,6 +3555,16 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
 
         processingReqIndex = m_requestManager->MarkProcessingRequest(&(m_camera_info.sensor.buffer[index]));
         shot_ext = (struct camera2_shot_ext *)(m_camera_info.sensor.buffer[index].virt.extP[1]);
+        if (shot_ext->isReprocessing) {
+            ALOGV("(%s): Sending signal for Reprocess request", __FUNCTION__);
+            m_currentReprocessOutStreams = shot_ext->shot.ctl.request.outputStreams[0];
+            shot_ext->request_scp = 0;
+            shot_ext->request_scc = 0;
+            m_reprocessingFrameCnt = shot_ext->shot.ctl.request.frameCount;
+            memcpy(&m_jpegMetadata, (void*)(m_requestManager->GetInternalShotExtByFrameCnt(m_reprocessingFrameCnt)),
+                sizeof(struct camera2_shot_ext));
+            m_streamThreads[1]->SetSignal(SIGNAL_STREAM_REPROCESSING_START);
+        }
         if (m_scp_closing || m_scp_closed) {
             ALOGD("(%s): SCP_CLOSING(%d) SCP_CLOSED(%d)", __FUNCTION__, m_scp_closing, m_scp_closed);
             shot_ext->request_scc = 0;
@@ -3815,7 +3829,7 @@ void ExynosCameraHWInterface2::m_streamFunc_direct(SignalDrivenThread *self)
         ALOGV("(%s): streamthread[%d] END   SIGNAL_STREAM_REPROCESSING_START",
             __FUNCTION__,selfThread->m_index);
 
-        return;
+        /* process next signal */
     }
     if (currentSignal & SIGNAL_STREAM_DATA_COMING) {
         buffer_handle_t * buf = NULL;
