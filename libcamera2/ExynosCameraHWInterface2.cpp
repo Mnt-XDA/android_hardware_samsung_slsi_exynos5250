@@ -3056,6 +3056,12 @@ void ExynosCameraHWInterface2::m_setShotAFTrigger(struct camera2_shot_ext *shot_
                 shot_ext->shot.ctl.aa.afMode = m_afMode;
                 shot_ext->shot.ctl.aa.afTrigger = 1;
             }
+
+            /* Set a different touch af scheme at video mode */
+            if (m_wideAspect && (m_afMode == AA_AFMODE_AUTO)) {
+                shot_ext->shot.ctl.aa.afMode = AA_AFMODE_AUTO_VIDEO;
+                AF_LOG("(%s): AF Mode change (%d) -> (%d) at video mode", __FUNCTION__, m_afMode, shot_ext->shot.ctl.aa.afMode);
+            }
             AF_LOG("(%s): AF State [%s]", __FUNCTION__, HAL_AFState_Name[m_afState]);
         }
     }
