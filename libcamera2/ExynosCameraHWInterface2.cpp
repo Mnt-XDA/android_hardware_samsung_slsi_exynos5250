@@ -391,7 +391,7 @@ void RequestManager::DeregisterRequest(camera_metadata_t ** deregistered_request
     frame_index = GetCompletedIndex();
     currentEntry =  &(entries[frame_index]);
     if (currentEntry->status != COMPLETED) {
-        CAM_LOGD("DBG(%s): Circular buffer abnormal. processing(%d), frame(%d), status(%d) ", __FUNCTION__,
+        ALOGW("DBG(%s): Circular buffer abnormal. processing(%d), frame(%d), status(%d) ", __FUNCTION__,
                        m_entryProcessingIndex, frame_index,(int)(currentEntry->status));
         return;
     }
@@ -456,7 +456,7 @@ int RequestManager::MarkProcessingRequest(ExynosBuffer* buf)
 
     Mutex::Autolock lock(m_requestMutex);
     if (m_numOfEntries == 0)  {
-        CAM_LOGD("DEBUG(%s): Request Manager Empty ", __FUNCTION__);
+        ALOGV("DEBUG(%s): Request Manager Empty ", __FUNCTION__);
         return -1;
     }
 
@@ -475,10 +475,11 @@ int RequestManager::MarkProcessingRequest(ExynosBuffer* buf)
     newEntry = &(entries[newProcessingIndex]);
     request_shot = &(newEntry->internal_shot);
     if (newEntry->status != REGISTERED) {
-        CAM_LOGD("DEBUG(%s)(%d): Circular buffer abnormal, numOfEntries(%d), status(%d)", __FUNCTION__, newProcessingIndex, m_numOfEntries, newEntry->status);
-        for (int i = 0; i < NUM_MAX_REQUEST_MGR_ENTRY; i++) {
-                CAM_LOGD("DBG: entrie[%d].stream output cnt = %d, framecnt(%d)", i, entries[i].output_stream_count, entries[i].internal_shot.shot.ctl.request.frameCount);
-        }
+        ALOGW("DEBUG(%s)(%d): Circular buffer abnormal, numOfEntries(%d), status(%d)", __FUNCTION__,
+                                                newProcessingIndex, m_numOfEntries, newEntry->status);
+        for (int i = 0; i < NUM_MAX_REQUEST_MGR_ENTRY; i++)
+            ALOGV("DBG: entrie[%d].stream output cnt = %d, framecnt(%d)", i,
+                        entries[i].output_stream_count, entries[i].internal_shot.shot.ctl.request.frameCount);
         return -1;
     }
 
@@ -872,7 +873,7 @@ int     RequestManager::FindFrameCnt(struct camera2_shot_ext * shot_ext)
     int i;
 
     if (m_numOfEntries == 0) {
-        CAM_LOGD("DBG(%s): No Entry found", __FUNCTION__);
+        ALOGV("DBG(%s): No Entry found", __FUNCTION__);
         return -1;
     }
 
@@ -884,10 +885,10 @@ int     RequestManager::FindFrameCnt(struct camera2_shot_ext * shot_ext)
             entries[i].status = CAPTURED;
             return entries[i].internal_shot.shot.ctl.request.frameCount;
         }
-        CAM_LOGE("ERR(%s): frameCount(%d), index(%d), status(%d)", __FUNCTION__, shot_ext->shot.ctl.request.frameCount, i, entries[i].status);
+        ALOGE("ERR(%s): frameCount(%d), index(%d), status(%d)", __FUNCTION__, shot_ext->shot.ctl.request.frameCount, i, entries[i].status);
 
     }
-    CAM_LOGD("(%s): No Entry found frame count(%d)", __FUNCTION__, shot_ext->shot.ctl.request.frameCount);
+    ALOGV("(%s): No Entry found frame count(%d)", __FUNCTION__, shot_ext->shot.ctl.request.frameCount);
 
     return -1;
 }
@@ -2054,7 +2055,7 @@ int ExynosCameraHWInterface2::registerStreamBuffers(uint32_t stream_id,
             return 1;
         }
     }
-    CAM_LOGV("DEBUG(%s): format(%x) width(%d), height(%d) svcPlanes(%d)",
+    ALOGV("DEBUG(%s): format(%x) width(%d), height(%d) svcPlanes(%d)",
             __FUNCTION__, targetStreamParms->format, targetStreamParms->width,
             targetStreamParms->height, targetStreamParms->planes);
     targetStreamParms->numSvcBuffers = num_buffers;
@@ -2763,17 +2764,17 @@ void ExynosCameraHWInterface2::m_mainThreadFunc(SignalDrivenThread * self)
         /*while (1)*/ {
             ret = m_requestManager->PrepareFrame(&numEntries, &frameSize, &preparedFrame, GetAfStateForService());
             if (ret == false)
-                CAM_LOGE("ERR(%s): PrepareFrame ret = %d", __FUNCTION__, ret);
+                ALOGE("ERR(%s): PrepareFrame ret = %d", __FUNCTION__, ret);
 
             m_requestManager->DeregisterRequest(&deregisteredRequest);
 
             ret = m_requestQueueOps->free_request(m_requestQueueOps, deregisteredRequest);
             if (ret < 0)
-                CAM_LOGE("ERR(%s): free_request ret = %d", __FUNCTION__, ret);
+                ALOGE("ERR(%s): free_request ret = %d", __FUNCTION__, ret);
 
             ret = m_frameQueueOps->dequeue_frame(m_frameQueueOps, numEntries, frameSize, &currentFrame);
             if (ret < 0)
-                CAM_LOGE("ERR(%s): dequeue_frame ret = %d", __FUNCTION__, ret);
+                ALOGE("ERR(%s): dequeue_frame ret = %d", __FUNCTION__, ret);
 
             if (currentFrame==NULL) {
                 ALOGV("DBG(%s): frame dequeue returned NULL",__FUNCTION__ );
@@ -3057,7 +3058,7 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
     ALOGV("DEBUG(%s): m_sensorThreadFunc (%x)", __FUNCTION__, currentSignal);
 
     if (currentSignal & SIGNAL_THREAD_RELEASE) {
-        CAM_LOGD("(%s): ENTER processing SIGNAL_THREAD_RELEASE", __FUNCTION__);
+        ALOGV("(%s): ENTER processing SIGNAL_THREAD_RELEASE", __FUNCTION__);
 
         ALOGV("(%s): calling sensor streamoff", __FUNCTION__);
         cam_int_streamoff(&(m_camera_info.sensor));
@@ -3401,7 +3402,7 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
             uint32_t current_scc = shot_ext->request_scc;
 
             if (shot_ext->shot.dm.request.frameCount == 0) {
-                CAM_LOGE("ERR(%s): dm.request.frameCount = %d", __FUNCTION__, shot_ext->shot.dm.request.frameCount);
+                ALOGE("ERR(%s): dm.request.frameCount = %d", __FUNCTION__, shot_ext->shot.dm.request.frameCount);
             }
 
             /* raw file dump */
@@ -3755,7 +3756,7 @@ void ExynosCameraHWInterface2::m_streamFunc_direct(SignalDrivenThread *self)
     nsecs_t frameTimeStamp;
 
     if (currentSignal & SIGNAL_THREAD_RELEASE) {
-        CAM_LOGD("(%s): [%d] START SIGNAL_THREAD_RELEASE", __FUNCTION__, selfThread->m_index);
+        ALOGV("(%s): [%d] START SIGNAL_THREAD_RELEASE", __FUNCTION__, selfThread->m_index);
 
         if (selfThread->m_isBufferInit) {
             if (!(currentNode->fd == m_camera_info.capture.fd && m_camera_info.capture.status == false)) {
@@ -3991,7 +3992,7 @@ void ExynosCameraHWInterface2::m_streamFunc_indirect(SignalDrivenThread *self)
 
 
     if (currentSignal & SIGNAL_THREAD_RELEASE) {
-        CAM_LOGV("(%s): [%d] START SIGNAL_THREAD_RELEASE", __FUNCTION__, selfThread->m_index);
+        ALOGV("(%s): [%d] START SIGNAL_THREAD_RELEASE", __FUNCTION__, selfThread->m_index);
 
         if (selfThread->m_isBufferInit) {
             if (currentNode->fd == m_camera_info.capture.fd) {
