@@ -85,16 +85,6 @@ namespace android {
 #define SIGNAL_STREAM_REPROCESSING_START        (SIGNAL_THREAD_COMMON_LAST<<14)
 #define SIGNAL_STREAM_DATA_COMING               (SIGNAL_THREAD_COMMON_LAST<<15)
 
-#define NO_TRANSITION                   (0)
-#define HAL_AFSTATE_INACTIVE            (1)
-#define HAL_AFSTATE_NEEDS_COMMAND       (2)
-#define HAL_AFSTATE_STARTED             (3)
-#define HAL_AFSTATE_SCANNING            (4)
-#define HAL_AFSTATE_LOCKED              (5)
-#define HAL_AFSTATE_FAILED              (6)
-#define HAL_AFSTATE_NEEDS_DETERMINATION (7)
-#define HAL_AFSTATE_PASSIVE_FOCUSED     (8)
-
 #define STREAM_ID_PREVIEW           (0)
 #define STREAM_MASK_PREVIEW         (1<<STREAM_ID_PREVIEW)
 #define STREAM_ID_RECORD            (1)
@@ -136,30 +126,6 @@ enum is_subscenario_id {
 	ISS_SUB_SCENARIO_SCENE2,
 	ISS_SUB_SCENARIO_SCENE3,
 	ISS_SUB_END
-};
-
-enum is_set_flash_command_state {
-    IS_FLASH_STATE_NONE = 0,
-    IS_FLASH_STATE_ON = 1,
-    IS_FLASH_STATE_ON_WAIT,
-    IS_FLASH_STATE_ON_DONE,
-    IS_FLASH_STATE_AUTO_AE_AWB_LOCK,
-    IS_FLASH_STATE_AE_AWB_LOCK_WAIT,
-    IS_FLASH_STATE_AUTO_WAIT,
-    IS_FLASH_STATE_AUTO_DONE,
-    IS_FLASH_STATE_AUTO_OFF,
-    IS_FLASH_STATE_CAPTURE,
-    IS_FLASH_STATE_CAPTURE_WAIT,
-    IS_FLASH_STATE_CAPTURE_JPEG,
-    IS_FLASH_STATE_CAPTURE_END,
-    IS_FALSH_STATE_MAX
-};
-
-enum is_set_command_state {
-    IS_COMMAND_NONE = 0,
-    IS_COMMAND_EXECUTION,
-    IS_COMMAND_CLEAR,
-    IS_COMMAND_MAX
 };
 
 typedef struct node_info {
@@ -205,20 +171,15 @@ typedef struct request_manager_entry {
     int                         output_stream_count;
 } request_manager_entry_t;
 
-// structure related to a specific function of camera
-typedef struct af_control_info {
-    int    m_afTriggerTimeOut;
-} ctl_af_info_t;
-
 typedef struct flash_control_info {
     // UI flash mode indicator
     enum aa_aemode    i_flashMode;
     // AF flash
-    bool        m_afFlashDoneFlg;
+    bool        m_afFlashFired;
     // Capture flash
     bool        m_flashEnableFlg;
     int         m_flashFrameCount;
-    int         m_flashCnt;
+    int         m_flashState;
     int        m_flashTimeOut;
     // Flash decision
     // At flash auto mode only : 1 -> flash is needed, 0 -> normal case
@@ -243,7 +204,6 @@ typedef struct scene_control_info {
 typedef struct request_control_info {
     ctl_flash_info_t flash;
     ctl_ae_info_t ae;
-    ctl_af_info_t af;
     ctl_scene_info_t scene;
 } ctl_request_info_t;
 
@@ -588,39 +548,41 @@ class MainThread : public SignalDrivenThread {
     int             InitializeISPChain();
     void            StartISP();
     void            StartSCCThread(bool threadExists);
-    int             GetAfState();
     void            SetAfMode(enum aa_afmode afMode);
-    void            SetAfRegion(uint32_t * afRegion);
     void            OnAfTrigger(int id);
-    void            OnAfTriggerAutoMacro(int id);
-    void            OnAfTriggerCAFPicture(int id);
-    void            OnAfTriggerCAFVideo(int id);
+    void            OnAfTriggerAutoMacro(void);
+    void            OnAfTriggerCAF(void);
     void            OnPrecaptureMeteringTriggerStart(int id);
     void            OnAfCancel(int id);
-    void            OnAfCancelAutoMacro(int id);
-    void            OnAfCancelCAFPicture(int id);
-    void            OnAfCancelCAFVideo(int id);
     void            OnPrecaptureMeteringNotificationISP();
-    void            OnPrecaptureMeteringNotificationSensor();
     void            OnAfNotification(enum aa_afstate noti);
     void            OnAfNotificationAutoMacro(enum aa_afstate noti);
-    void            OnAfNotificationCAFPicture(enum aa_afstate noti);
-    void            OnAfNotificationCAFVideo(enum aa_afstate noti);
+    void            OnAfNotificationCAF(enum aa_afstate noti);
+    void            OnFlashListenerISP(struct camera2_shot_ext *shot_ext);
     void            SetAfStateForService(int newState);
-    int             GetAfStateForService();
+    int             GetAfStateForService(void);
     exif_attribute_t    mExifInfo;
     void            m_setExifFixedAttribute(void);
     void            m_setExifChangedAttribute(exif_attribute_t *exifInfo, ExynosRect *rect,
                          camera2_shot_ext *currentEntry);
-    void            m_preCaptureSetter(struct camera2_shot_ext * shot_ext);
-    void            m_preCaptureListenerSensor(struct camera2_shot_ext * shot_ext);
-    void            m_preCaptureListenerISP(struct camera2_shot_ext * shot_ext);
-    void            m_preCaptureAeState(struct camera2_shot_ext * shot_ext);
-    void            m_updateAfRegion(struct camera2_shot_ext * shot_ext);
-    void            m_afTrigger(struct camera2_shot_ext * shot_ext, int mode);
-    void               *m_exynosPictureCSC;
-    void               *m_exynosVideoCSC;
 
+    void            *m_exynosPictureCSC;
+    void            *m_exynosVideoCSC;
+
+    void            m_setShotZoom(struct camera2_shot_ext *shot_ext);
+    void            m_setShotAFMode(struct camera2_shot_ext *shot_ext);
+    void            m_setShotAFTrigger(struct camera2_shot_ext *shot_ext);
+    void            m_setShotAFRegion(struct camera2_shot_ext * shot_ext);
+    void            m_setShotNightshot(struct camera2_shot_ext *shot_ext, int &matchedFrameCnt);
+    void            m_setShotFrameDuration(struct camera2_shot_ext *shot_ext);
+    void            m_setShotSensorMode(struct camera2_shot_ext *shot_ext);
+    void            m_setShotReprocessing(struct camera2_shot_ext *shot_ext);
+    void            m_setShotFlash(struct camera2_shot_ext *shot_ext);
+
+    void            m_controlFlashTorch(struct camera2_shot_ext *shot_ext);
+    void            m_controlFlashCapture(struct camera2_shot_ext *shot_ext, int &matchedFrameCnt);
+    void            m_setDmAeState(struct camera2_shot_ext * shot_ext);
+    void            m_setDmFaceRectangles(struct camera2_shot_ext *shot_ext);
 
     camera2_request_queue_src_ops_t     *m_requestQueueOps;
     camera2_frame_queue_dst_ops_t       *m_frameQueueOps;
@@ -655,7 +617,7 @@ class MainThread : public SignalDrivenThread {
     bool                                m_scp_closing;
     bool                                m_scp_closed;
     bool                                m_wideAspect;
-    uint32_t                            currentAfRegion[4];
+    uint32_t                            m_currentAfRegion[4];
     float                               m_zoomRatio;
 
     int                                 m_vdisBubbleCnt;
@@ -663,7 +625,7 @@ class MainThread : public SignalDrivenThread {
 
     mutable Mutex                       m_qbufLock;
     mutable Mutex                       m_jpegEncoderLock;
-    mutable Mutex                       m_afModeTriggerLock;
+    mutable Mutex                       m_TriggerLock;
 
     bool                                m_scpForceSuspended;
     int                                 m_afState;
@@ -671,12 +633,8 @@ class MainThread : public SignalDrivenThread {
     enum aa_afmode                      m_afMode;
     enum aa_afmode                      m_afMode2;
     bool                                m_IsAfModeUpdateRequired;
-    bool                                m_IsAfTriggerRequired;
     bool                                m_IsAfLockRequired;
     int                                 m_serviceAfState;
-    bool                                m_AfHwStateFailed;
-    int                                 m_afPendingTriggerId;
-    int                                 m_afModeWaitingCnt;
     struct camera2_shot_ext             m_jpegMetadata;
     int                                 m_scpOutputSignalCnt;
     int                                 m_scpOutputImageCnt;
