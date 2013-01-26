@@ -776,8 +776,10 @@ void    RequestManager::UpdateIspParameters(struct camera2_shot_ext *shot_ext, i
         request_shot->shot.ctl.aa.aeMode = AA_AEMODE_ON;
     }
     /* Apply metering mode */
-    if (request_shot->metering_mode > AA_AEMODE_METERING_NONE)
+    if (request_shot->metering_mode > AA_AEMODE_METERING_NONE) {
         request_shot->shot.ctl.aa.aeMode = (enum aa_aemode)request_shot->metering_mode;
+        ctl_info->ae.aeMeteringMode = request_shot->metering_mode;
+    }
 
     // Apply ae/awb lock or unlock
     if (request_shot->ae_lock == AEMODE_LOCK_ON)
@@ -5465,22 +5467,24 @@ void ExynosCameraHWInterface2::m_setExifChangedAttribute(exif_attribute_t *exifI
         exifInfo->exposure_bias.den = 0;
     }
     //3 Metering Mode
-    /*switch (m_curCameraInfo->metering) {
-    case METERING_MODE_CENTER:
+    switch (m_ctlInfo.ae.aeMeteringMode) {
+    case AA_AEMODE_METERING_NONE:
+    case AA_AEMODE_CENTER:
         exifInfo->metering_mode = EXIF_METERING_CENTER;
         break;
-    case METERING_MODE_MATRIX:
-        exifInfo->metering_mode = EXIF_METERING_MULTISPOT;
-        break;
-    case METERING_MODE_SPOT:
-        exifInfo->metering_mode = EXIF_METERING_SPOT;
-        break;
-    case METERING_MODE_AVERAGE:
-    default:
+    case AA_AEMODE_AVERAGE:
         exifInfo->metering_mode = EXIF_METERING_AVERAGE;
         break;
-    }*/
-    exifInfo->metering_mode = EXIF_METERING_CENTER;
+    case AA_AEMODE_MATRIX:
+        exifInfo->metering_mode = EXIF_METERING_AVERAGE;
+        break;
+    case AA_AEMODE_SPOT:
+        exifInfo->metering_mode = EXIF_METERING_SPOT;
+        break;
+    default:
+        exifInfo->metering_mode = EXIF_METERING_CENTER;
+        break;
+    }
 
     //3 Flash
     if (m_ctlInfo.flash.m_flashDecisionResult)

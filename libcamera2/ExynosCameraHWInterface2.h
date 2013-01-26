@@ -194,6 +194,7 @@ typedef struct flash_control_info {
 typedef struct ae_control_info {
     // pre-capture notification state
     enum ae_state    aeStateNoti;
+    enum aa_metering_aemode aeMeteringMode;
 } ctl_ae_info_t;
 
 typedef struct scene_control_info {
