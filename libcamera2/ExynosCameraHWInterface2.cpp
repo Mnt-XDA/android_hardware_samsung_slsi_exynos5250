@@ -537,7 +537,6 @@ int RequestManager::MarkProcessingRequest(ExynosBuffer* buf)
     struct camera2_shot_ext * request_shot;
     int targetStreamIndex = 0;
     request_manager_entry * newEntry = NULL;
-    static int count = 0;
 
     Mutex::Autolock lock(m_requestMutex);
     if (m_numOfEntries == 0)  {
@@ -555,10 +554,10 @@ int RequestManager::MarkProcessingRequest(ExynosBuffer* buf)
     }
 
     int newProcessingIndex = GetNextIndex(m_entryProcessingIndex);
-    ALOGV("DEBUG(%s): index(%d)", __FUNCTION__, newProcessingIndex);
 
     newEntry = &(entries[newProcessingIndex]);
     request_shot = &(newEntry->internal_shot);
+    ALOGV("DEBUG(%s): index(%d) framecount(%d)", __FUNCTION__, newProcessingIndex, request_shot->shot.ctl.request.frameCount);
     if (newEntry->status != REGISTERED) {
         ALOGW("DEBUG(%s)(%d): Circular buffer abnormal, numOfEntries(%d), status(%d)", __FUNCTION__,
                                                 newProcessingIndex, m_numOfEntries, newEntry->status);
@@ -589,12 +588,8 @@ int RequestManager::MarkProcessingRequest(ExynosBuffer* buf)
     if (shot_ext->shot.ctl.stats.faceDetectMode != FACEDETECT_MODE_OFF)
         shot_ext->fd_bypass = 0;
 
-    if (count == 0){
-        shot_ext->shot.ctl.aa.mode = AA_CONTROL_AUTO;
-    } else
-        shot_ext->shot.ctl.aa.mode = AA_CONTROL_NONE;
+    shot_ext->shot.ctl.aa.mode = AA_CONTROL_NONE;
 
-    count++;
     shot_ext->shot.ctl.request.metadataMode = METADATA_MODE_FULL;
     shot_ext->shot.ctl.stats.faceDetectMode = FACEDETECT_MODE_FULL;
     shot_ext->shot.magicNumber = 0x23456789;
@@ -1001,10 +996,13 @@ void     RequestManager::SetInitialSkip(int count)
 int     RequestManager::GetSkipCnt()
 {
     ALOGV("(%s): skip cnt(%d)", __FUNCTION__, m_sensorPipelineSkipCnt);
-    if (m_sensorPipelineSkipCnt == 0)
-        return m_sensorPipelineSkipCnt;
-    else
-        return --m_sensorPipelineSkipCnt;
+    return m_sensorPipelineSkipCnt;
+}
+
+void RequestManager::DecreaseSkipCnt()
+{
+    m_sensorPipelineSkipCnt--;
+    ALOGV("(%s): decreased skip cnt(%d)", __FUNCTION__, m_sensorPipelineSkipCnt);
 }
 
 void RequestManager::Dump(void)
@@ -1369,8 +1367,10 @@ int ExynosCameraHWInterface2::InitializeISPChain()
 
     /*sensor setting*/
     m_camera_info.dummy_shot.shot.ctl.sensor.exposureTime = 0;
-    m_camera_info.dummy_shot.shot.ctl.sensor.frameDuration = 0;
+    m_camera_info.dummy_shot.shot.ctl.sensor.frameDuration = 33 * 1000 * 1000;
     m_camera_info.dummy_shot.shot.ctl.sensor.sensitivity = 0;
+
+    m_camera_info.dummy_shot.shot.ctl.request.frameCount = -1;
 
     m_camera_info.dummy_shot.shot.ctl.scaler.cropRegion[0] = 0;
     m_camera_info.dummy_shot.shot.ctl.scaler.cropRegion[1] = 0;
@@ -1380,6 +1380,9 @@ int ExynosCameraHWInterface2::InitializeISPChain()
     m_camera_info.dummy_shot.request_scc = 0;
     m_camera_info.dummy_shot.request_scp = 0;
     m_camera_info.dummy_shot.shot.ctl.request.outputStreams[0] = 0;
+
+    m_camera_info.dummy_shot.shot.ctl.aa.aeTargetFpsRange[0] = 30;
+    m_camera_info.dummy_shot.shot.ctl.aa.aeTargetFpsRange[1] = 30;
 
     m_camera_info.sensor.width = m_camera2->getSensorRawW();
     m_camera_info.sensor.height = m_camera2->getSensorRawH();
@@ -1438,8 +1441,6 @@ int ExynosCameraHWInterface2::InitializeISPChain()
     ALOGV("DEBUG(%s): sensor reqbuf done",  __FUNCTION__);
     for (i = 0; i < m_camera_info.sensor.buffers; i++) {
         ALOGV("DEBUG(%s): sensor initial QBUF [%d]",  __FUNCTION__, i);
-        m_camera_info.dummy_shot.shot.ctl.sensor.frameDuration = 33*1000*1000; // apply from frame #1
-        m_camera_info.dummy_shot.shot.ctl.request.frameCount = -1;
         memcpy( m_camera_info.sensor.buffer[i].virt.extP[1], &(m_camera_info.dummy_shot),
                 sizeof(struct camera2_shot_ext));
     }
@@ -1600,8 +1601,6 @@ int ExynosCameraHWInterface2::notifyRequestQueueNotEmpty()
 
             for (i = 0; i < m_camera_info.sensor.buffers; i++) {
                 ALOGV("DEBUG(%s): sensor initial QBUF [%d]",  __FUNCTION__, i);
-                m_camera_info.dummy_shot.shot.ctl.sensor.frameDuration = 33*1000*1000; // apply from frame #1
-                m_camera_info.dummy_shot.shot.ctl.request.frameCount = -1;
                 memcpy( m_camera_info.sensor.buffer[i].virt.extP[1], &(m_camera_info.dummy_shot),
                         sizeof(struct camera2_shot_ext));
             }
@@ -1689,7 +1688,7 @@ int ExynosCameraHWInterface2::notifyRequestQueueNotEmpty()
     if (m_isIspStarted == false) {
         StartISP();
         ALOGV("DEBUG(%s):starting sensor thread", __FUNCTION__);
-        m_requestManager->SetInitialSkip(6);
+        m_requestManager->SetInitialSkip(3);
         m_sensorThread->Start("SensorThread", PRIORITY_DEFAULT, 0);
         m_isIspStarted = true;
     }
@@ -3125,6 +3124,8 @@ void ExynosCameraHWInterface2::m_setShotFrameDuration(struct camera2_shot_ext *s
     shot_ext->shot.ctl.sensor.frameDuration = frameDuration;
     /* Set max fps to 30, ISP controls fps by fps range[0] and frameduration */
     shot_ext->shot.ctl.aa.aeTargetFpsRange[1] = 30;
+    if (m_requestManager->GetSkipCnt() > 0)
+        shot_ext->shot.ctl.aa.aeTargetFpsRange[0] = 30;
 }
 
 void ExynosCameraHWInterface2::m_controlFlashTorch(struct camera2_shot_ext *shot_ext)
@@ -3979,6 +3980,8 @@ void ExynosCameraHWInterface2::m_streamFunc_direct(SignalDrivenThread *self)
                 res = selfStreamParms->streamOps->cancel_buffer(selfStreamParms->streamOps,
                         &(selfStreamParms->svcBufHandle[selfStreamParms->bufIndex]));
                 ALOGV("DEBUG(%s): streamthread[%d] cancel_buffer to svc done res(%d)", __FUNCTION__, selfThread->m_index, res);
+                if ((currentOutputStreams & STREAM_MASK_PREVIEW) && selfThread->m_index == 0)
+                    m_requestManager->DecreaseSkipCnt();
             }
             if (directOutputEnabled) {
                 if (!m_nightCaptureFrameCnt)

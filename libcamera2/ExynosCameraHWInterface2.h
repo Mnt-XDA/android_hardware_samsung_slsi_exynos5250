@@ -241,6 +241,7 @@ public:
     void    SetDefaultParameters(int cropX);
     void    SetInitialSkip(int count);
     int     GetSkipCnt();
+    void    DecreaseSkipCnt();
     int     GetCompletedIndex();
     void    pushSensorQ(int index);
     int     popSensorQ();
