@@ -1439,15 +1439,13 @@ int ExynosCameraHWInterface2::InitializeISPChain()
     ALOGV("DEBUG(%s): sensor s_fmt done",  __FUNCTION__);
     cam_int_reqbufs(&(m_camera_info.sensor));
     ALOGV("DEBUG(%s): sensor reqbuf done",  __FUNCTION__);
-    for (i = 0; i < m_camera_info.sensor.buffers; i++) {
-        ALOGV("DEBUG(%s): sensor initial QBUF [%d]",  __FUNCTION__, i);
+    for (i = 0; i < m_camera_info.sensor.buffers; i++)
         memcpy( m_camera_info.sensor.buffer[i].virt.extP[1], &(m_camera_info.dummy_shot),
                 sizeof(struct camera2_shot_ext));
-    }
-
-    for (i = 0; i < NUM_MIN_SENSOR_QBUF; i++)
+    for (i = 0; i < NUM_MIN_SENSOR_QBUF; i++) {
+        ALOGV("(%s): sensor initial QBUF [%d]",  __FUNCTION__, i);
         cam_int_qbuf(&(m_camera_info.sensor), i);
-
+    }
     for (i = NUM_MIN_SENSOR_QBUF; i < m_camera_info.sensor.buffers; i++)
         m_requestManager->pushSensorQ(i);
 
@@ -1599,14 +1597,13 @@ int ExynosCameraHWInterface2::notifyRequestQueueNotEmpty()
             cam_int_s_fmt(&(m_camera_info.sensor));
             cam_int_reqbufs(&(m_camera_info.sensor));
 
-            for (i = 0; i < m_camera_info.sensor.buffers; i++) {
-                ALOGV("DEBUG(%s): sensor initial QBUF [%d]",  __FUNCTION__, i);
+            for (i = 0; i < m_camera_info.sensor.buffers; i++)
                 memcpy( m_camera_info.sensor.buffer[i].virt.extP[1], &(m_camera_info.dummy_shot),
                         sizeof(struct camera2_shot_ext));
-            }
-            for (i = 0; i < NUM_MIN_SENSOR_QBUF; i++)
+            for (i = 0; i < NUM_MIN_SENSOR_QBUF; i++) {
+                ALOGV("(%s): sensor initial QBUF [%d]",  __FUNCTION__, i);
                 cam_int_qbuf(&(m_camera_info.sensor), i);
-
+            }
             for (i = NUM_MIN_SENSOR_QBUF; i < m_camera_info.sensor.buffers; i++)
                 m_requestManager->pushSensorQ(i);
             ALOGV("DEBUG(%s): calling sensor streamon", __FUNCTION__);
@@ -3362,7 +3359,7 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
     uint32_t        currentSignal = self->GetProcessingSignal();
     SensorThread *  selfThread      = ((SensorThread*)self);
     int index;
-    int index_isp;
+    int index_isp, index_sensor_qbuf;
     nsecs_t frameTime;
 
     ALOGV("DEBUG(%s): m_sensorThreadFunc (%x)", __FUNCTION__, currentSignal);
@@ -3404,6 +3401,7 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
         int targetStreamIndex = 0, i=0;
         int matchedFrameCnt = -1, processingReqIndex;
         struct camera2_shot_ext *shot_ext;
+        struct camera2_shot_ext *shot_ext_sensor_qbuf;
         struct camera2_shot_ext *shot_ext_capture;
         bool triggered = false;
         bool rawDumpMode = false;
@@ -3412,8 +3410,29 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
         ALOGV("Sensor DQbuf start");
         index = cam_int_dqbuf(&(m_camera_info.sensor));
         m_requestManager->pushSensorQ(index);
-        ALOGV("Sensor DQbuf done(%d)", index);
         shot_ext = (struct camera2_shot_ext *)(m_camera_info.sensor.buffer[index].virt.extP[1]);
+        ALOGV("Sensor DQbuf done index(%d)", index);
+
+        index_sensor_qbuf = m_requestManager->popSensorQ();
+        if (index_sensor_qbuf < 0){
+            ALOGE("sensorQ is empty");
+            return;
+        }
+
+        processingReqIndex = m_requestManager->MarkProcessingRequest(&(m_camera_info.sensor.buffer[index_sensor_qbuf]));
+        shot_ext_sensor_qbuf = (struct camera2_shot_ext *)(m_camera_info.sensor.buffer[index_sensor_qbuf].virt.extP[1]);
+        if (processingReqIndex >= 0 && shot_ext_sensor_qbuf->isReprocessing) {
+            ALOGV("(%s): Sending signal for Reprocess request", __FUNCTION__);
+            m_currentReprocessOutStreams = shot_ext_sensor_qbuf->shot.ctl.request.outputStreams[0];
+            shot_ext_sensor_qbuf->request_scp = 0;
+            shot_ext_sensor_qbuf->request_scc = 0;
+            m_reprocessingFrameCnt = shot_ext_sensor_qbuf->shot.ctl.request.frameCount;
+            memcpy(&m_jpegMetadata, (void*)(m_requestManager->GetInternalShotExtByFrameCnt(m_reprocessingFrameCnt)),
+                sizeof(struct camera2_shot_ext));
+            m_streamThreads[1]->SetSignal(SIGNAL_STREAM_REPROCESSING_START);
+        }
+        cam_int_qbuf(&(m_camera_info.sensor), index_sensor_qbuf);
+        ALOGV("Sensor Qbuf done(%d)", index_sensor_qbuf);
 
         if (m_nightCaptureCnt != 0) {
             matchedFrameCnt = m_nightCaptureFrameCnt;
@@ -3621,33 +3640,6 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
 
             OnAfNotification(shot_ext->shot.dm.aa.afState);
         }
-
-        index = m_requestManager->popSensorQ();
-        if(index < 0){
-            ALOGE("sensorQ is empty");
-            return;
-        }
-
-        processingReqIndex = m_requestManager->MarkProcessingRequest(&(m_camera_info.sensor.buffer[index]));
-        shot_ext = (struct camera2_shot_ext *)(m_camera_info.sensor.buffer[index].virt.extP[1]);
-        if (shot_ext->isReprocessing) {
-            ALOGV("(%s): Sending signal for Reprocess request", __FUNCTION__);
-            m_currentReprocessOutStreams = shot_ext->shot.ctl.request.outputStreams[0];
-            shot_ext->request_scp = 0;
-            shot_ext->request_scc = 0;
-            m_reprocessingFrameCnt = shot_ext->shot.ctl.request.frameCount;
-            memcpy(&m_jpegMetadata, (void*)(m_requestManager->GetInternalShotExtByFrameCnt(m_reprocessingFrameCnt)),
-                sizeof(struct camera2_shot_ext));
-            m_streamThreads[1]->SetSignal(SIGNAL_STREAM_REPROCESSING_START);
-        }
-        if (m_scp_closing || m_scp_closed) {
-            ALOGD("(%s): SCP_CLOSING(%d) SCP_CLOSED(%d)", __FUNCTION__, m_scp_closing, m_scp_closed);
-            shot_ext->request_scc = 0;
-            shot_ext->request_scp = 0;
-            shot_ext->request_sensor = 0;
-        }
-        cam_int_qbuf(&(m_camera_info.sensor), index);
-        ALOGV("Sensor Qbuf done(%d)", index);
 
         if (!m_scp_closing
             && ((matchedFrameCnt == -1) || (processingReqIndex == -1))){
