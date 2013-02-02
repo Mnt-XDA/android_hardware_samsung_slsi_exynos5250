@@ -634,12 +634,14 @@ void RequestManager::NotifyStreamOutput(uint32_t frameCnt)
 void RequestManager::CheckCompleted(int index)
 {
     if ((entries[index].status == METADONE || entries[index].status == COMPLETED)
-        && (entries[index].output_stream_count <= 0)){
-        ALOGV("(%s): Completed(index:%d)(frameCnt:%d)", __FUNCTION__,
-                index, entries[index].internal_shot.shot.ctl.request.frameCount );
-        entries[index].status = COMPLETED;
-        if (m_lastCompletedFrameCnt + 1 == entries[index].internal_shot.shot.ctl.request.frameCount)
-            m_mainThread->SetSignal(SIGNAL_MAIN_STREAM_OUTPUT_DONE);
+        || (entries[index].status == REQUESTED && entries[index].internal_shot.isReprocessing)) {
+        if (entries[index].output_stream_count <= 0) {
+            ALOGV("(%s): Completed(index:%d)(frameCnt:%d)(reprocess:%d)", __FUNCTION__,
+                    index, entries[index].internal_shot.shot.ctl.request.frameCount, entries[index].internal_shot.isReprocessing);
+            entries[index].status = COMPLETED;
+            if (m_lastCompletedFrameCnt + 1 == entries[index].internal_shot.shot.ctl.request.frameCount)
+                m_mainThread->SetSignal(SIGNAL_MAIN_STREAM_OUTPUT_DONE);
+        }
     }
 }
 
@@ -3422,6 +3424,7 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
         processingReqIndex = m_requestManager->MarkProcessingRequest(&(m_camera_info.sensor.buffer[index_sensor_qbuf]));
         shot_ext_sensor_qbuf = (struct camera2_shot_ext *)(m_camera_info.sensor.buffer[index_sensor_qbuf].virt.extP[1]);
         if (processingReqIndex >= 0 && shot_ext_sensor_qbuf->isReprocessing) {
+            struct camera2_shot_ext *next_shot_ext;
             ALOGV("(%s): Sending signal for Reprocess request", __FUNCTION__);
             m_currentReprocessOutStreams = shot_ext_sensor_qbuf->shot.ctl.request.outputStreams[0];
             shot_ext_sensor_qbuf->request_scp = 0;
@@ -3430,6 +3433,11 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
             memcpy(&m_jpegMetadata, (void*)(m_requestManager->GetInternalShotExtByFrameCnt(m_reprocessingFrameCnt)),
                 sizeof(struct camera2_shot_ext));
             m_streamThreads[1]->SetSignal(SIGNAL_STREAM_REPROCESSING_START);
+            next_shot_ext = m_requestManager->GetInternalShotExtByFrameCnt(m_reprocessingFrameCnt + 1);
+            if (next_shot_ext && !(next_shot_ext->isReprocessing)) {
+                ALOGV("(%s): Processing next request", __FUNCTION__);
+                processingReqIndex = m_requestManager->MarkProcessingRequest(&(m_camera_info.sensor.buffer[index_sensor_qbuf]));
+            }
         }
         cam_int_qbuf(&(m_camera_info.sensor), index_sensor_qbuf);
         ALOGV("Sensor Qbuf done(%d)", index_sensor_qbuf);
