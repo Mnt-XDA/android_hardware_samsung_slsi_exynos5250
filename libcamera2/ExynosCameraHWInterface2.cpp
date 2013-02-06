@@ -600,7 +600,8 @@ int RequestManager::MarkProcessingRequest(ExynosBuffer* buf)
     shot_ext->isReprocessing = request_shot->isReprocessing;
     shot_ext->reprocessInput = request_shot->reprocessInput;
     if (shot_ext->isReprocessing) {
-        ALOGE("(%s): reprocess request - framecnt(%d)", __FUNCTION__, shot_ext->shot.ctl.request.frameCount);
+        ALOGD("(%s): reprocess request - framecnt(%d)",
+                     __FUNCTION__, shot_ext->shot.ctl.request.frameCount);
         shot_ext->request_scp = 0;
         shot_ext->request_scc = 0;
     }
@@ -755,7 +756,6 @@ void    RequestManager::UpdateIspParameters(struct camera2_shot_ext *shot_ext, i
     /* Set Reprocessing */
     shot_ext->isReprocessing = request_shot->isReprocessing;
     shot_ext->reprocessInput = request_shot->reprocessInput;
-    shot_ext->shot.ctl.request.outputStreams[0] = 0;
 
     shot_ext->awb_mode_dm = request_shot->awb_mode_dm;
 
@@ -1099,8 +1099,6 @@ ExynosCameraHWInterface2::ExynosCameraHWInterface2(int cameraId, camera2_device_
     if(m_ionCameraClient == 0)
         ALOGE("ERR(%s):Fail on ion_client_create", __FUNCTION__);
 
-
-    m_BayerManager = new BayerBufManager();
     m_mainThread    = new MainThread(this);
     m_requestManager = new RequestManager((SignalDrivenThread*)(m_mainThread.get()));
     *openInvalid = InitializeISPChain();
@@ -1251,10 +1249,6 @@ void ExynosCameraHWInterface2::release()
         m_requestManager = NULL;
     }
 
-    if (m_BayerManager != NULL) {
-        delete m_BayerManager;
-        m_BayerManager = NULL;
-    }
     for (i = 0; i < NUM_BAYER_BUFFERS; i++)
         freeCameraMemory(&m_camera_info.sensor.buffer[i], m_camera_info.sensor.planes);
 
@@ -1889,9 +1883,6 @@ int ExynosCameraHWInterface2::allocateStream(uint32_t width, uint32_t height, in
             AllocatedStream->Start("StreamThread", PRIORITY_DEFAULT, 0);
             m_streamThreadInitialize((SignalDrivenThread*)AllocatedStream);
 
-            *format_actual                      = HAL_PIXEL_FORMAT_EXYNOS_YV12;
-            *max_buffers                        = 6;
-
             *format_actual = HAL_PIXEL_FORMAT_YCbCr_422_I; // YUYV
             *usage = GRALLOC_USAGE_SW_WRITE_OFTEN;
             *max_buffers = 6;
@@ -1941,9 +1932,6 @@ int ExynosCameraHWInterface2::allocateStream(uint32_t width, uint32_t height, in
             *stream_id = STREAM_ID_ZSL;
 
             m_streamThreadInitialize((SignalDrivenThread*)AllocatedStream);
-
-            *format_actual                      = HAL_PIXEL_FORMAT_EXYNOS_YV12;
-            *max_buffers                        = 6;
 
             *format_actual = HAL_PIXEL_FORMAT_YCbCr_422_I; // YUYV
             *usage = GRALLOC_USAGE_SW_WRITE_OFTEN;
@@ -2627,180 +2615,6 @@ bool ExynosCameraHWInterface2::m_getRatioSize(int  src_w,  int   src_h,
         *crop_y -= 1;
 
     return true;
-}
-
-BayerBufManager::BayerBufManager()
-{
-    ALOGV("DEBUG(%s): ", __FUNCTION__);
-    for (int i = 0; i < NUM_BAYER_BUFFERS ; i++) {
-        entries[i].status = BAYER_ON_HAL_EMPTY;
-        entries[i].reqFrameCnt = 0;
-    }
-    sensorEnqueueHead = 0;
-    sensorDequeueHead = 0;
-    ispEnqueueHead = 0;
-    ispDequeueHead = 0;
-    numOnSensor = 0;
-    numOnIsp = 0;
-    numOnHalFilled = 0;
-    numOnHalEmpty = NUM_BAYER_BUFFERS;
-}
-
-BayerBufManager::~BayerBufManager()
-{
-    ALOGV("%s", __FUNCTION__);
-}
-
-int     BayerBufManager::GetIndexForSensorEnqueue()
-{
-    int ret = 0;
-    if (numOnHalEmpty == 0)
-        ret = -1;
-    else
-        ret = sensorEnqueueHead;
-    ALOGV("DEBUG(%s): returning (%d)", __FUNCTION__, ret);
-    return ret;
-}
-
-int    BayerBufManager::MarkSensorEnqueue(int index)
-{
-    ALOGV("DEBUG(%s)    : BayerIndex[%d] ", __FUNCTION__, index);
-
-    // sanity check
-    if (index != sensorEnqueueHead) {
-        ALOGV("DEBUG(%s)    : Abnormal BayerIndex[%d] - expected[%d]", __FUNCTION__, index, sensorEnqueueHead);
-        return -1;
-    }
-    if (entries[index].status != BAYER_ON_HAL_EMPTY) {
-        ALOGV("DEBUG(%s)    : Abnormal status in BayerIndex[%d] = (%d) expected (%d)", __FUNCTION__,
-            index, entries[index].status, BAYER_ON_HAL_EMPTY);
-        return -1;
-    }
-
-    entries[index].status = BAYER_ON_SENSOR;
-    entries[index].reqFrameCnt = 0;
-    numOnHalEmpty--;
-    numOnSensor++;
-    sensorEnqueueHead = GetNextIndex(index);
-    ALOGV("DEBUG(%s) END: HAL-e(%d) HAL-f(%d) Sensor(%d) ISP(%d) ",
-        __FUNCTION__, numOnHalEmpty, numOnHalFilled, numOnSensor, numOnIsp);
-    return 0;
-}
-
-int    BayerBufManager::MarkSensorDequeue(int index, int reqFrameCnt, nsecs_t *timeStamp)
-{
-    ALOGV("DEBUG(%s)    : BayerIndex[%d] reqFrameCnt(%d)", __FUNCTION__, index, reqFrameCnt);
-
-    if (entries[index].status != BAYER_ON_SENSOR) {
-        ALOGE("DEBUG(%s)    : Abnormal status in BayerIndex[%d] = (%d) expected (%d)", __FUNCTION__,
-            index, entries[index].status, BAYER_ON_SENSOR);
-        return -1;
-    }
-
-    entries[index].status = BAYER_ON_HAL_FILLED;
-    numOnHalFilled++;
-    numOnSensor--;
-
-    return 0;
-}
-
-int     BayerBufManager::GetIndexForIspEnqueue(int *reqFrameCnt)
-{
-    int ret = 0;
-    if (numOnHalFilled == 0)
-        ret = -1;
-    else {
-        *reqFrameCnt = entries[ispEnqueueHead].reqFrameCnt;
-        ret = ispEnqueueHead;
-    }
-    ALOGV("DEBUG(%s): returning BayerIndex[%d]", __FUNCTION__, ret);
-    return ret;
-}
-
-int     BayerBufManager::GetIndexForIspDequeue(int *reqFrameCnt)
-{
-    int ret = 0;
-    if (numOnIsp == 0)
-        ret = -1;
-    else {
-        *reqFrameCnt = entries[ispDequeueHead].reqFrameCnt;
-        ret = ispDequeueHead;
-    }
-    ALOGV("DEBUG(%s): returning BayerIndex[%d]", __FUNCTION__, ret);
-    return ret;
-}
-
-int    BayerBufManager::MarkIspEnqueue(int index)
-{
-    ALOGV("DEBUG(%s)    : BayerIndex[%d] ", __FUNCTION__, index);
-
-    // sanity check
-    if (index != ispEnqueueHead) {
-        ALOGV("DEBUG(%s)    : Abnormal BayerIndex[%d] - expected[%d]", __FUNCTION__, index, ispEnqueueHead);
-        return -1;
-    }
-    if (entries[index].status != BAYER_ON_HAL_FILLED) {
-        ALOGV("DEBUG(%s)    : Abnormal status in BayerIndex[%d] = (%d) expected (%d)", __FUNCTION__,
-            index, entries[index].status, BAYER_ON_HAL_FILLED);
-        return -1;
-    }
-
-    entries[index].status = BAYER_ON_ISP;
-    numOnHalFilled--;
-    numOnIsp++;
-    ispEnqueueHead = GetNextIndex(index);
-    ALOGV("DEBUG(%s) END: HAL-e(%d) HAL-f(%d) Sensor(%d) ISP(%d) ",
-        __FUNCTION__, numOnHalEmpty, numOnHalFilled, numOnSensor, numOnIsp);
-    return 0;
-}
-
-int    BayerBufManager::MarkIspDequeue(int index)
-{
-    ALOGV("DEBUG(%s)    : BayerIndex[%d]", __FUNCTION__, index);
-
-    // sanity check
-    if (index != ispDequeueHead) {
-        ALOGV("DEBUG(%s)    : Abnormal BayerIndex[%d] - expected[%d]", __FUNCTION__, index, ispDequeueHead);
-        return -1;
-    }
-    if (entries[index].status != BAYER_ON_ISP) {
-        ALOGV("DEBUG(%s)    : Abnormal status in BayerIndex[%d] = (%d) expected (%d)", __FUNCTION__,
-            index, entries[index].status, BAYER_ON_ISP);
-        return -1;
-    }
-
-    entries[index].status = BAYER_ON_HAL_EMPTY;
-    entries[index].reqFrameCnt = 0;
-    numOnHalEmpty++;
-    numOnIsp--;
-    ispDequeueHead = GetNextIndex(index);
-    ALOGV("DEBUG(%s) END: HAL-e(%d) HAL-f(%d) Sensor(%d) ISP(%d) ",
-        __FUNCTION__, numOnHalEmpty, numOnHalFilled, numOnSensor, numOnIsp);
-    return 0;
-}
-
-int BayerBufManager::GetNumOnSensor()
-{
-    return numOnSensor;
-}
-
-int BayerBufManager::GetNumOnHalFilled()
-{
-    return numOnHalFilled;
-}
-
-int BayerBufManager::GetNumOnIsp()
-{
-    return numOnIsp;
-}
-
-int     BayerBufManager::GetNextIndex(int index)
-{
-    index++;
-    if (index >= NUM_BAYER_BUFFERS)
-        index = 0;
-
-    return index;
 }
 
 void ExynosCameraHWInterface2::m_mainThreadFunc(SignalDrivenThread * self)
@@ -3939,8 +3753,8 @@ void ExynosCameraHWInterface2::m_streamFunc_direct(SignalDrivenThread *self)
                     m_requestManager->NotifyStreamOutput(frame->rcount);
             }
 
-            ALOGV("DEBUG(%s): streamthread[%d] DQBUF done index(%d)  sigcnt(%d)",__FUNCTION__,
-                selfThread->m_index, selfStreamParms->bufIndex, m_scpOutputSignalCnt);
+            ALOGV("(%s): streamthread[%d] DQBUF done index(%d)", __FUNCTION__,
+                selfThread->m_index, selfStreamParms->bufIndex);
 
             if (selfStreamParms->svcBufStatus[selfStreamParms->bufIndex] !=  ON_DRIVER)
                 ALOGV("DBG(%s): DQed buffer status abnormal (%d) ",
@@ -4150,8 +3964,6 @@ void ExynosCameraHWInterface2::m_streamThreadFunc(SignalDrivenThread * self)
 {
     uint32_t                currentSignal   = self->GetProcessingSignal();
     StreamThread *          selfThread      = ((StreamThread*)self);
-    stream_parameters_t     *selfStreamParms =  &(selfThread->m_parameters);
-    node_info_t             *currentNode    = selfStreamParms->node;
 
     ALOGV("DEBUG(%s): m_streamThreadFunc[%d] (%x)", __FUNCTION__, selfThread->m_index, currentSignal);
 
@@ -4379,9 +4191,7 @@ int ExynosCameraHWInterface2::m_recordCreator(StreamThread *selfThread, ExynosBu
     stream_parameters_t     *selfStreamParms = &(selfThread->m_parameters);
     substream_parameters_t  *subParms        = &m_subStreams[STREAM_ID_RECORD];
     status_t    res;
-    ExynosRect jpegRect;
     bool found = false;
-    int cropX, cropY, cropW, cropH = 0;
     buffer_handle_t * buf = NULL;
 
     ALOGV("DEBUG(%s): index(%d)",__FUNCTION__, subParms->svcBufIndex);
@@ -4667,8 +4477,6 @@ bool ExynosCameraHWInterface2::yuv2Jpeg(ExynosBuffer *yuvBuf, ExynosBuffer *jpeg
                                         ExynosRect *rect, exif_attribute_t *exifInfo,
                                         int jpegQuality, int thumbQuality)
 {
-    unsigned char *addr;
-
     ExynosJpegEncoderForCamera jpegEnc;
     bool ret = false;
     int res = 0;
@@ -4912,7 +4720,7 @@ void ExynosCameraHWInterface2::OnAfTriggerCAF(void)
         if ((m_ctlInfo.flash.i_flashMode >= AA_AEMODE_ON_AUTO_FLASH)
                 && (m_ctlInfo.flash.m_flashEnableFlg == false)
                 && (m_cameraId == 0)) {
-            ALOGV("[AF Flash] AF Flash start with Mode (%d) state (%d) id (%d)", m_afMode, m_afState, id);
+            ALOGV("[AF Flash] AF Flash start with Mode (%d) state (%d) id (%d)", m_afMode, m_afState, m_cameraId);
             m_ctlInfo.flash.m_flashEnableFlg = true;
             m_ctlInfo.flash.m_flashState = FLASH_STATE_ON;
             m_ctlInfo.flash.m_flashDecisionResult = false;

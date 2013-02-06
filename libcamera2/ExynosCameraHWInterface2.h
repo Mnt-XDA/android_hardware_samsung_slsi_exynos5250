@@ -275,57 +275,11 @@ private:
     List<int>                   m_sensorQ;
 };
 
-
-typedef struct bayer_buf_entry {
-    int     status;
-    int     reqFrameCnt;
-    nsecs_t timeStamp;
-} bayer_buf_entry_t;
-
-
-class BayerBufManager {
-public:
-    BayerBufManager();
-    ~BayerBufManager();
-    int                 GetIndexForSensorEnqueue();
-    int                 MarkSensorEnqueue(int index);
-    int                 MarkSensorDequeue(int index, int reqFrameCnt, nsecs_t *timeStamp);
-    int                 GetIndexForIspEnqueue(int *reqFrameCnt);
-    int                 GetIndexForIspDequeue(int *reqFrameCnt);
-    int                 MarkIspEnqueue(int index);
-    int                 MarkIspDequeue(int index);
-    int                 GetNumOnSensor();
-    int                 GetNumOnHalFilled();
-    int                 GetNumOnIsp();
-
-private:
-    int                 GetNextIndex(int index);
-
-    int                 sensorEnqueueHead;
-    int                 sensorDequeueHead;
-    int                 ispEnqueueHead;
-    int                 ispDequeueHead;
-    int                 numOnSensor;
-    int                 numOnIsp;
-    int                 numOnHalFilled;
-    int                 numOnHalEmpty;
-
-    bayer_buf_entry_t   entries[NUM_BAYER_BUFFERS];
-};
-
-
 #define NOT_AVAILABLE           (0)
 #define REQUIRES_DQ_FROM_SVC    (1)
 #define ON_DRIVER               (2)
 #define ON_HAL                  (3)
 #define ON_SERVICE              (4)
-
-#define BAYER_NOT_AVAILABLE     (0)
-#define BAYER_ON_SENSOR         (1)
-#define BAYER_ON_HAL_FILLED     (2)
-#define BAYER_ON_ISP            (3)
-#define BAYER_ON_SERVICE        (4)
-#define BAYER_ON_HAL_EMPTY      (5)
 
 typedef struct stream_parameters {
             uint32_t                width;
@@ -507,7 +461,6 @@ class MainThread : public SignalDrivenThread {
     substream_parameters_t  m_subStreams[STREAM_ID_LAST+1];
 
     RequestManager      *m_requestManager;
-    BayerBufManager     *m_BayerManager;
     ExynosCamera2       *m_camera2;
 
     void                m_mainThreadFunc(SignalDrivenThread * self);
@@ -608,8 +561,6 @@ class MainThread : public SignalDrivenThread {
     ExynosBuffer                        m_sccLocalBuffer[NUM_MAX_CAMERA_BUFFERS];
     bool                                m_sccLocalBufferValid;
 
-    int                                 indexToQueue[3+1];
-
     bool                                m_scp_flushing;
     bool                                m_closing;
     ExynosBuffer                        m_resizeBuf;
@@ -625,7 +576,6 @@ class MainThread : public SignalDrivenThread {
     int                                 m_vdisBubbleCnt;
     int                                 m_vdisDupFrame;
 
-    mutable Mutex                       m_qbufLock;
     mutable Mutex                       m_jpegEncoderLock;
     mutable Mutex                       m_TriggerLock;
 
@@ -638,8 +588,6 @@ class MainThread : public SignalDrivenThread {
     bool                                m_IsAfLockRequired;
     int                                 m_serviceAfState;
     struct camera2_shot_ext             m_jpegMetadata;
-    int                                 m_scpOutputSignalCnt;
-    int                                 m_scpOutputImageCnt;
     int                                 m_nightCaptureCnt;
     int                                 m_nightCaptureFrameCnt;
     int                                 m_lastSceneMode;
