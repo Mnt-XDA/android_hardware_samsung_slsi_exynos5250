@@ -980,8 +980,6 @@ int     RequestManager::FindFrameCnt(struct camera2_shot_ext * shot_ext)
             entries[i].status = CAPTURED;
             return entries[i].internal_shot.shot.ctl.request.frameCount;
         }
-        ALOGE("ERR(%s): frameCount(%d), index(%d), status(%d)", __FUNCTION__, shot_ext->shot.ctl.request.frameCount, i, entries[i].status);
-
     }
     ALOGV("(%s): No Entry found frame count(%d)", __FUNCTION__, shot_ext->shot.ctl.request.frameCount);
 
@@ -1056,20 +1054,17 @@ ExynosCameraHWInterface2::ExynosCameraHWInterface2(int cameraId, camera2_device_
             m_requestQueueOps(NULL),
             m_frameQueueOps(NULL),
             m_callbackCookie(NULL),
-            m_numOfRemainingReqInSvc(0),
-            m_isRequestQueuePending(false),
             m_isRequestQueueNull(true),
             m_halDevice(dev),
             m_ionCameraClient(0),
             m_isIspStarted(false),
             m_sccLocalBufferValid(false),
             m_cameraId(cameraId),
-            m_scp_closing(false),
-            m_scp_closed(false),
             m_wideAspect(false),
             m_zoomRatio(1),
             m_vdisBubbleCnt(0),
             m_vdisDupFrame(0),
+            m_isAlreadyRegistered(false),
             m_scpForceSuspended(false),
             m_afState(HAL_AFSTATE_INACTIVE),
             m_afTriggerId(0),
@@ -1572,7 +1567,7 @@ int ExynosCameraHWInterface2::notifyRequestQueueNotEmpty()
 {
     int i = 0;
 
-    ALOGV("DEBUG(%s):setting [SIGNAL_MAIN_REQ_Q_NOT_EMPTY] current(%d)", __FUNCTION__, m_requestManager->GetNumEntries());
+    ALOGV("(%s): START current num of entries(%d)", __FUNCTION__, m_requestManager->GetNumEntries());
     if ((NULL==m_frameQueueOps)|| (NULL==m_requestQueueOps)) {
         ALOGE("DEBUG(%s):queue ops NULL. ignoring request", __FUNCTION__);
         return 0;
@@ -1685,7 +1680,7 @@ int ExynosCameraHWInterface2::notifyRequestQueueNotEmpty()
         m_sensorThread->Start("SensorThread", PRIORITY_DEFAULT, 0);
         m_isIspStarted = true;
     }
-    m_mainThread->SetSignal(SIGNAL_MAIN_REQ_Q_NOT_EMPTY);
+    m_sensorThread->SetSignal(SIGNAL_SENSOR_START_REQ_PROCESSING);
     return 0;
 }
 
@@ -2619,7 +2614,6 @@ bool ExynosCameraHWInterface2::m_getRatioSize(int  src_w,  int   src_h,
 
 void ExynosCameraHWInterface2::m_mainThreadFunc(SignalDrivenThread * self)
 {
-    camera_metadata_t *currentRequest = NULL;
     camera_metadata_t *currentFrame = NULL;
     size_t numEntries = 0;
     size_t frameSize = 0;
@@ -2630,7 +2624,6 @@ void ExynosCameraHWInterface2::m_mainThreadFunc(SignalDrivenThread * self)
     int res = 0;
 
     int ret;
-    int afMode;
 
     ALOGV("DEBUG(%s): m_mainThreadFunc (%x)", __FUNCTION__, currentSignal);
 
@@ -2640,36 +2633,6 @@ void ExynosCameraHWInterface2::m_mainThreadFunc(SignalDrivenThread * self)
         ALOGV("DEBUG(%s): processing SIGNAL_THREAD_RELEASE DONE", __FUNCTION__);
         selfThread->SetSignal(SIGNAL_THREAD_TERMINATE);
         return;
-    }
-
-    if (currentSignal & SIGNAL_MAIN_REQ_Q_NOT_EMPTY) {
-        ALOGV("DEBUG(%s): MainThread processing SIGNAL_MAIN_REQ_Q_NOT_EMPTY", __FUNCTION__);
-        if (m_requestManager->IsRequestQueueFull()==false) {
-            Mutex::Autolock lock(m_TriggerLock);
-            m_requestQueueOps->dequeue_request(m_requestQueueOps, &currentRequest);
-            if (NULL == currentRequest) {
-                ALOGD("DEBUG(%s)(0x%x): No more service requests left in the queue ", __FUNCTION__, currentSignal);
-                m_isRequestQueueNull = true;
-                if (m_requestManager->IsVdisEnable())
-                    m_vdisBubbleCnt = 1;
-            }
-            else {
-                m_requestManager->RegisterRequest(currentRequest, &afMode, m_currentAfRegion);
-
-                if (afMode != -1)
-                    SetAfMode((enum aa_afmode)afMode);
-
-                m_numOfRemainingReqInSvc = m_requestQueueOps->request_count(m_requestQueueOps);
-                ALOGV("DEBUG(%s): remaining req cnt (%d)", __FUNCTION__, m_numOfRemainingReqInSvc);
-                if (m_requestManager->IsRequestQueueFull()==false)
-                    selfThread->SetSignal(SIGNAL_MAIN_REQ_Q_NOT_EMPTY); // dequeue repeatedly
-
-                m_sensorThread->SetSignal(SIGNAL_SENSOR_START_REQ_PROCESSING);
-            }
-        }
-        else {
-            m_isRequestQueuePending = true;
-        }
     }
 
     if (currentSignal & SIGNAL_MAIN_STREAM_OUTPUT_DONE) {
@@ -2703,14 +2666,6 @@ void ExynosCameraHWInterface2::m_mainThreadFunc(SignalDrivenThread * self)
             else {
                 ALOGE("ERR(%s): frame metadata append fail (%d)",__FUNCTION__, res);
             }
-        }
-        if (!m_isRequestQueueNull) {
-            selfThread->SetSignal(SIGNAL_MAIN_REQ_Q_NOT_EMPTY);
-        }
-
-        if (getInProgressCount()>0) {
-            ALOGV("DEBUG(%s): STREAM_OUTPUT_DONE and signalling REQ_PROCESSING",__FUNCTION__);
-            m_sensorThread->SetSignal(SIGNAL_SENSOR_START_REQ_PROCESSING);
         }
     }
     ALOGV("DEBUG(%s): MainThread Exit", __FUNCTION__);
@@ -3219,8 +3174,10 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
         struct camera2_shot_ext *shot_ext;
         struct camera2_shot_ext *shot_ext_sensor_qbuf;
         struct camera2_shot_ext *shot_ext_capture;
+        camera_metadata_t *currentRequest = NULL;
         bool triggered = false;
         bool rawDumpMode = false;
+        int afMode;
 
         /* dqbuf from sensor */
         ALOGV("Sensor DQbuf start");
@@ -3235,8 +3192,37 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
             return;
         }
 
-        processingReqIndex = m_requestManager->MarkProcessingRequest(&(m_camera_info.sensor.buffer[index_sensor_qbuf]));
+        if (m_isAlreadyRegistered) {
+            ALOGD("(%s): previously registered request exists", __FUNCTION__);
+        } else {
+            if (!m_isRequestQueueNull && !(m_requestManager->IsRequestQueueFull())) {
+                Mutex::Autolock lock(m_TriggerLock);
+                m_requestQueueOps->dequeue_request(m_requestQueueOps, &currentRequest);
+                if (NULL == currentRequest) {
+                    ALOGD("(%s): No more service requests left in the queue", __FUNCTION__);
+                    m_isRequestQueueNull = true;
+                    if (m_requestManager->IsVdisEnable()) {
+                        ALOGD("(%s): enabling vdis bubble", __FUNCTION__);
+                        m_vdisBubbleCnt = 1;
+                    }
+                } else {
+                    m_requestManager->RegisterRequest(currentRequest, &afMode, m_currentAfRegion);
+
+                    if (afMode != -1)
+                        SetAfMode((enum aa_afmode)afMode);
+
+                    ALOGV("(%s): remaining req cnt (%d)", __FUNCTION__, m_requestQueueOps->request_count(m_requestQueueOps));
+                }
+            }
+        }
+
+        if (m_vdisBubbleCnt == 0)
+            processingReqIndex = m_requestManager->MarkProcessingRequest(&(m_camera_info.sensor.buffer[index_sensor_qbuf]));
+        else
+            processingReqIndex = -1;
         shot_ext_sensor_qbuf = (struct camera2_shot_ext *)(m_camera_info.sensor.buffer[index_sensor_qbuf].virt.extP[1]);
+
+        m_isAlreadyRegistered = false;
         if (processingReqIndex >= 0 && shot_ext_sensor_qbuf->isReprocessing) {
             struct camera2_shot_ext *next_shot_ext;
             ALOGV("(%s): Sending signal for Reprocess request", __FUNCTION__);
@@ -3247,10 +3233,31 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
             memcpy(&m_jpegMetadata, (void*)(m_requestManager->GetInternalShotExtByFrameCnt(m_reprocessingFrameCnt)),
                 sizeof(struct camera2_shot_ext));
             m_streamThreads[1]->SetSignal(SIGNAL_STREAM_REPROCESSING_START);
-            next_shot_ext = m_requestManager->GetInternalShotExtByFrameCnt(m_reprocessingFrameCnt + 1);
-            if (next_shot_ext && !(next_shot_ext->isReprocessing)) {
-                ALOGV("(%s): Processing next request", __FUNCTION__);
-                processingReqIndex = m_requestManager->MarkProcessingRequest(&(m_camera_info.sensor.buffer[index_sensor_qbuf]));
+
+            if (!m_isRequestQueueNull && !(m_requestManager->IsRequestQueueFull())) {
+                Mutex::Autolock lock(m_TriggerLock);
+                m_requestQueueOps->dequeue_request(m_requestQueueOps, &currentRequest);
+                if (NULL == currentRequest) {
+                    ALOGD("(%s): ## No more service requests left in the queue", __FUNCTION__);
+                    m_isRequestQueueNull = true;
+                    if (m_requestManager->IsVdisEnable()) {
+                        ALOGD("(%s): ## enabling vdis bubble", __FUNCTION__);
+                        m_vdisBubbleCnt = 1;
+                    }
+                } else {
+                    m_requestManager->RegisterRequest(currentRequest, &afMode, m_currentAfRegion);
+                    if (afMode != -1)
+                        SetAfMode((enum aa_afmode)afMode);
+
+                    next_shot_ext = m_requestManager->GetInternalShotExtByFrameCnt(m_reprocessingFrameCnt + 1);
+                    if (next_shot_ext && !(next_shot_ext->isReprocessing)) {
+                        ALOGV("(%s): Processing next request", __FUNCTION__);
+                        processingReqIndex = m_requestManager->MarkProcessingRequest(&(m_camera_info.sensor.buffer[index_sensor_qbuf]));
+                        m_isAlreadyRegistered = false;
+                    } else {
+                        m_isAlreadyRegistered = true;
+                    }
+                }
             }
         }
         cam_int_qbuf(&(m_camera_info.sensor), index_sensor_qbuf);
@@ -3412,15 +3419,6 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
                 m_streamThreads[0]->SetSignal(SIGNAL_STREAM_DATA_COMING);
             }
 
-            ALOGV("(%s): SCP_CLOSING check sensor(%d) scc(%d) scp(%d) ", __FUNCTION__,
-               shot_ext->request_sensor, shot_ext->request_scc, shot_ext->request_scp);
-            if (shot_ext->request_scc + shot_ext->request_scp + shot_ext->request_sensor == 0) {
-                ALOGV("(%s): SCP_CLOSING check OK ", __FUNCTION__);
-                m_scp_closed = true;
-            }
-            else
-                m_scp_closed = false;
-
             OnAfNotification(shot_ext->shot.dm.aa.afState);
             OnPrecaptureMeteringNotificationISP();
         }   else {
@@ -3463,12 +3461,7 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
             OnAfNotification(shot_ext->shot.dm.aa.afState);
         }
 
-        if (!m_scp_closing
-            && ((matchedFrameCnt == -1) || (processingReqIndex == -1))){
-            ALOGV("make bubble shot: matchedFramcnt(%d) processingReqIndex(%d)",
-                                    matchedFrameCnt, processingReqIndex);
-            selfThread->SetSignal(SIGNAL_SENSOR_START_REQ_PROCESSING);
-        }
+        selfThread->SetSignal(SIGNAL_SENSOR_START_REQ_PROCESSING);
     }
     return;
 }
@@ -3681,6 +3674,9 @@ void ExynosCameraHWInterface2::m_streamFunc_direct(SignalDrivenThread *self)
         bool found = false;
         ALOGV("(%s): streamthread[%d] START SIGNAL_STREAM_REPROCESSING_START",
             __FUNCTION__, selfThread->m_index);
+
+        m_streamBufferInit(self);
+
         res = m_reprocessOps->acquire_buffer(m_reprocessOps, &buf);
         if (res != NO_ERROR || buf == NULL) {
             ALOGE("ERR(%s): [reprocess] unable to acquire_buffer : %d",__FUNCTION__ , res);

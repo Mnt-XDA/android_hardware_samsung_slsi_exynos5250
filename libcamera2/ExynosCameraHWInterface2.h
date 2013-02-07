@@ -59,7 +59,7 @@ namespace android {
 #define NODE_PREFIX     "/dev/video"
 
 #define NUM_MAX_STREAM_THREAD       (5)
-#define NUM_MAX_REQUEST_MGR_ENTRY   (5)
+#define NUM_MAX_REQUEST_MGR_ENTRY   (6)
 #define NUM_MAX_CAMERA_BUFFERS      (16)
 #define NUM_BAYER_BUFFERS           (8)
 #define NUM_SCC_BUFFERS             (8)
@@ -73,7 +73,6 @@ namespace android {
 #define STREAM_TYPE_DIRECT   (0)
 #define STREAM_TYPE_INDIRECT (1)
 
-#define SIGNAL_MAIN_REQ_Q_NOT_EMPTY             (SIGNAL_THREAD_COMMON_LAST<<1)
 
 #define SIGNAL_MAIN_STREAM_OUTPUT_DONE          (SIGNAL_THREAD_COMMON_LAST<<3)
 #define SIGNAL_SENSOR_START_REQ_PROCESSING      (SIGNAL_THREAD_COMMON_LAST<<4)
@@ -544,8 +543,6 @@ class MainThread : public SignalDrivenThread {
     camera2_notify_callback             m_notifyCb;
     void                                *m_callbackCookie;
 
-    int                                 m_numOfRemainingReqInSvc;
-    bool                                m_isRequestQueuePending;
     bool                                m_isRequestQueueNull;
     camera2_device_t                    *m_halDevice;
     static gralloc_module_t const*      m_grallocHal;
@@ -557,24 +554,20 @@ class MainThread : public SignalDrivenThread {
 
     bool                                m_isIspStarted;
 
-    int                                 m_need_streamoff;
     ExynosBuffer                        m_sccLocalBuffer[NUM_MAX_CAMERA_BUFFERS];
     bool                                m_sccLocalBufferValid;
 
-    bool                                m_scp_flushing;
-    bool                                m_closing;
     ExynosBuffer                        m_resizeBuf;
     int                                 m_currentReprocessOutStreams;
     ExynosBuffer                        m_previewCbBuf;
     int             				    m_cameraId;
-    bool                                m_scp_closing;
-    bool                                m_scp_closed;
     bool                                m_wideAspect;
     uint32_t                            m_currentAfRegion[4];
     float                               m_zoomRatio;
 
     int                                 m_vdisBubbleCnt;
     int                                 m_vdisDupFrame;
+    bool                                m_isAlreadyRegistered;
 
     mutable Mutex                       m_jpegEncoderLock;
     mutable Mutex                       m_TriggerLock;
