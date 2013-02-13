@@ -448,6 +448,8 @@ int ExynosJpegBase::setJpegConfig(enum MODE eMode, void *pConfig)
         case V4L2_PIX_FMT_RGB565X:
         case V4L2_PIX_FMT_BGR32:
         case V4L2_PIX_FMT_RGB32:
+        case V4L2_PIX_FMT_NV12:
+        case V4L2_PIX_FMT_NV21:
             t_iPlaneNum = 1;
             break;
         default:
@@ -464,6 +466,8 @@ int ExynosJpegBase::setJpegConfig(enum MODE eMode, void *pConfig)
         case V4L2_PIX_FMT_RGB565X:
         case V4L2_PIX_FMT_BGR32:
         case V4L2_PIX_FMT_RGB32:
+        case V4L2_PIX_FMT_NV12:
+        case V4L2_PIX_FMT_NV21:
             t_iPlaneNum = 1;
             break;
         default:
@@ -570,6 +574,8 @@ int ExynosJpegBase::setColorFormat(enum MODE eMode, int iV4l2ColorFormat)
     switch(iV4l2ColorFormat) {
     case V4L2_PIX_FMT_YUYV:
     case V4L2_PIX_FMT_YUV420:
+    case V4L2_PIX_FMT_NV12:
+    case V4L2_PIX_FMT_NV21:
     case V4L2_PIX_FMT_NV16:
     case V4L2_PIX_FMT_RGB565X:
     case V4L2_PIX_FMT_BGR32:
@@ -595,6 +601,8 @@ int ExynosJpegBase::setColorFormat(enum MODE eMode, int iV4l2ColorFormat)
 
     switch (iV4l2ColorFormat) {
     case V4L2_PIX_FMT_YUV420:
+    case V4L2_PIX_FMT_NV12:
+    case V4L2_PIX_FMT_NV21:
     case V4L2_PIX_FMT_NV16:
     case V4L2_PIX_FMT_YUYV:
     case V4L2_PIX_FMT_RGB565X:
@@ -684,6 +692,8 @@ int ExynosJpegBase::setColorBufSize(int iFormat, int *piBufSize, int iSize, int 
         pBufSize[2] = 0;
         break;
     case V4L2_PIX_FMT_YUV420:
+    case V4L2_PIX_FMT_NV12:
+    case V4L2_PIX_FMT_NV21:
         pBufSize[0] = (width*height*3)/2;
         pBufSize[1] = 0;
         pBufSize[2] = 0;
