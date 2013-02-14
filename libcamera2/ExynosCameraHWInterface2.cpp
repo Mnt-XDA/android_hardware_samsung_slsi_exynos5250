@@ -1795,7 +1795,7 @@ int ExynosCameraHWInterface2::allocateStream(uint32_t width, uint32_t height, in
             m_streamThreadInitialize((SignalDrivenThread*)AllocatedStream);
 
             *format_actual                      = HAL_PIXEL_FORMAT_EXYNOS_YV12;
-            *usage                              = GRALLOC_USAGE_SW_WRITE_OFTEN;
+            *usage                              = 0;
             *max_buffers                        = 6;
 
             newParameters.width                 = width;
@@ -1840,7 +1840,7 @@ int ExynosCameraHWInterface2::allocateStream(uint32_t width, uint32_t height, in
             }
 
             *format_actual = HAL_PIXEL_FORMAT_YCbCr_420_SP; // NV12M
-            *usage = GRALLOC_USAGE_SW_WRITE_OFTEN;
+            *usage = 0;
             *max_buffers = 6;
 
             subParameters->type         = SUBSTREAM_TYPE_RECORD;
@@ -1885,7 +1885,7 @@ int ExynosCameraHWInterface2::allocateStream(uint32_t width, uint32_t height, in
             m_streamThreadInitialize((SignalDrivenThread*)AllocatedStream);
 
             *format_actual = HAL_PIXEL_FORMAT_YCbCr_422_I; // YUYV
-            *usage = GRALLOC_USAGE_SW_WRITE_OFTEN;
+            *usage = 0;
             *max_buffers = 6;
 
             newParameters.width                 = width;
@@ -1935,7 +1935,7 @@ int ExynosCameraHWInterface2::allocateStream(uint32_t width, uint32_t height, in
             m_streamThreadInitialize((SignalDrivenThread*)AllocatedStream);
 
             *format_actual = HAL_PIXEL_FORMAT_YCbCr_422_I; // YUYV
-            *usage = GRALLOC_USAGE_SW_WRITE_OFTEN;
+            *usage = 0;
             *max_buffers = 6;
 
             newParameters.width                 = width;
@@ -1987,7 +1987,7 @@ int ExynosCameraHWInterface2::allocateStream(uint32_t width, uint32_t height, in
         parentStream = (StreamThread*)(m_streamThreads[1].get());
 
         *format_actual = HAL_PIXEL_FORMAT_BLOB;
-        *usage = GRALLOC_USAGE_SW_WRITE_OFTEN;
+        *usage = GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN;
         *max_buffers = 4;
 
         subParameters->type          = SUBSTREAM_TYPE_JPEG;
@@ -2023,7 +2023,7 @@ int ExynosCameraHWInterface2::allocateStream(uint32_t width, uint32_t height, in
         }
 
         *format_actual = format;
-        *usage = GRALLOC_USAGE_SW_WRITE_OFTEN;
+        *usage = GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN;
         *max_buffers = 6;
 
         subParameters->type         = SUBSTREAM_TYPE_PRVCB;
@@ -3584,7 +3584,7 @@ void ExynosCameraHWInterface2::m_streamBufferInit(SignalDrivenThread *self)
                 m_resizeBuf.size.extS[1] = 0;
                 m_resizeBuf.size.extS[2] = 0;
 
-                if (allocCameraMemory(m_ionCameraClient, &m_resizeBuf, 1) == -1) {
+                if (allocCameraMemory(m_ionCameraClient, &m_resizeBuf, 1, 1 << 0) == -1) {
                     ALOGE("ERR(%s): Failed to allocate resize buf", __FUNCTION__);
                 }
             }
@@ -5600,11 +5600,10 @@ int ExynosCameraHWInterface2::allocCameraMemory(ion_client ionClient, ExynosBuff
             break;
         }
         if (1 << i & cacheFlag)
-            flag = ION_FLAG_CACHED;
+            flag = ION_FLAG_CACHED | ION_FLAG_CACHED_NEEDS_SYNC | ION_FLAG_PRESERVE_KMAP;
         else
             flag = 0;
-        buf->fd.extFd[i] = ion_alloc(ionClient, \
-                                      buf->size.extS[i], 0, ION_HEAP_EXYNOS_MASK, flag);
+        buf->fd.extFd[i] = ion_alloc(ionClient, buf->size.extS[i], 0, ION_HEAP_SYSTEM_MASK, flag);
         if ((buf->fd.extFd[i] == -1) ||(buf->fd.extFd[i] == 0)) {
             ALOGE("[%s]ion_alloc(%d) failed\n", __FUNCTION__, buf->size.extS[i]);
             buf->fd.extFd[i] = -1;
