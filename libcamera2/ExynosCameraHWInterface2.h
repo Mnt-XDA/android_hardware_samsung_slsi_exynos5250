@@ -453,10 +453,25 @@ class MainThread : public SignalDrivenThread {
 
     };
 
+    class MiscThread : public SignalDrivenThread {
+        ExynosCameraHWInterface2 *mHardware;
+    public:
+        MiscThread(ExynosCameraHWInterface2 *hw):
+            SignalDrivenThread(),
+            mHardware(hw) { }
+        MiscThread();
+        void threadFunctionInternal() {
+            mHardware->m_miscThreadFunc(this);
+            return;
+        }
+        void            release(void);
+    };
+
     sp<MainThread>      m_mainThread;
     sp<SensorThread>    m_sensorThread;
     sp<StreamThread>    m_streamThreads[NUM_MAX_STREAM_THREAD];
     sp<JpegEncThread>   m_jpegEncThread;
+    sp<MiscThread>      m_miscThread;
     substream_parameters_t  m_subStreams[STREAM_ID_LAST+1];
 
     RequestManager      *m_requestManager;
@@ -466,6 +481,7 @@ class MainThread : public SignalDrivenThread {
     void                m_sensorThreadFunc(SignalDrivenThread * self);
     void                m_streamThreadFunc(SignalDrivenThread * self);
     void                m_jpegEncThreadFunc(SignalDrivenThread * self);
+    void                m_miscThreadFunc(SignalDrivenThread * self);
 
     void                m_streamThreadInitialize(SignalDrivenThread * self);
 
@@ -571,6 +587,7 @@ class MainThread : public SignalDrivenThread {
 
     mutable Mutex                       m_jpegEncoderLock;
     mutable Mutex                       m_TriggerLock;
+    mutable Mutex                       m_streamInitLock;
 
     bool                                m_scpForceSuspended;
     int                                 m_afState;

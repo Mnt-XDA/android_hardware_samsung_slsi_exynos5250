@@ -1130,6 +1130,9 @@ ExynosCameraHWInterface2::ExynosCameraHWInterface2(int cameraId, camera2_device_
         m_jpegEncThread = new JpegEncThread(this);
         m_jpegEncThread->Start("JpegEncThread", PRIORITY_DEFAULT, 0);
 
+        m_miscThread = new MiscThread(this);
+        m_miscThread->Start("MiscThread", PRIORITY_DEFAULT, 0);
+
         for (int i = 0 ; i < STREAM_ID_LAST+1 ; i++)
             m_subStreams[i].type =  SUBSTREAM_TYPE_NONE;
         CSC_METHOD cscMethod = CSC_METHOD_HW;
@@ -1198,6 +1201,9 @@ void ExynosCameraHWInterface2::release()
     if (m_jpegEncThread != NULL) {
         m_jpegEncThread->release();
     }
+
+    if (m_miscThread != NULL)
+        m_miscThread->release();
 
     if (m_exynosPictureCSC)
         csc_deinit(m_exynosPictureCSC);
@@ -3232,7 +3238,7 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
             m_reprocessingFrameCnt = shot_ext_sensor_qbuf->shot.ctl.request.frameCount;
             memcpy(&m_jpegMetadata, (void*)(m_requestManager->GetInternalShotExtByFrameCnt(m_reprocessingFrameCnt)),
                 sizeof(struct camera2_shot_ext));
-            m_streamThreads[1]->SetSignal(SIGNAL_STREAM_REPROCESSING_START);
+            m_miscThread->SetSignal(SIGNAL_STREAM_REPROCESSING_START);
 
             if (!m_isRequestQueueNull && !(m_requestManager->IsRequestQueueFull())) {
                 Mutex::Autolock lock(m_TriggerLock);
@@ -3468,6 +3474,7 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
 
 void ExynosCameraHWInterface2::m_streamBufferInit(SignalDrivenThread *self)
 {
+    Mutex::Autolock lock(m_streamInitLock);
     uint32_t                currentSignal   = self->GetProcessingSignal();
     StreamThread *          selfThread      = ((StreamThread*)self);
     stream_parameters_t     *selfStreamParms =  &(selfThread->m_parameters);
@@ -3667,54 +3674,6 @@ void ExynosCameraHWInterface2::m_streamFunc_direct(SignalDrivenThread *self)
         selfThread->m_activated = false;
         ALOGV("(%s): [%d] END  SIGNAL_THREAD_RELEASE", __FUNCTION__, selfThread->m_index);
         return;
-    }
-    if (currentSignal & SIGNAL_STREAM_REPROCESSING_START) {
-        status_t    res;
-        buffer_handle_t * buf = NULL;
-        bool found = false;
-        ALOGV("(%s): streamthread[%d] START SIGNAL_STREAM_REPROCESSING_START",
-            __FUNCTION__, selfThread->m_index);
-
-        m_streamBufferInit(self);
-
-        res = m_reprocessOps->acquire_buffer(m_reprocessOps, &buf);
-        if (res != NO_ERROR || buf == NULL) {
-            ALOGE("ERR(%s): [reprocess] unable to acquire_buffer : %d",__FUNCTION__ , res);
-            return;
-        }
-        const private_handle_t *priv_handle = reinterpret_cast<const private_handle_t *>(*buf);
-        int checkingIndex = 0;
-        for (checkingIndex = 0; checkingIndex < selfStreamParms->numSvcBuffers ; checkingIndex++) {
-            if (priv_handle->fd == selfStreamParms->svcBuffers[checkingIndex].fd.extFd[0] ) {
-                found = true;
-                break;
-            }
-        }
-        ALOGV("DEBUG(%s): dequeued buf %x => found(%d) index(%d) ",
-            __FUNCTION__, (unsigned int)buf, found, checkingIndex);
-
-        if (!found) return;
-
-        for (int i = 0 ; i < NUM_MAX_SUBSTREAM ; i++) {
-            if (selfThread->m_attachedSubStreams[i].streamId == -1)
-                continue;
-
-            frameTimeStamp = m_requestManager->GetTimestampByFrameCnt(m_reprocessingFrameCnt);
-            m_requestManager->NotifyStreamOutput(m_reprocessingFrameCnt);
-            if (m_currentReprocessOutStreams & (1<<selfThread->m_attachedSubStreams[i].streamId))
-                m_runSubStreamFunc(selfThread, &(selfStreamParms->svcBuffers[checkingIndex]),
-                    selfThread->m_attachedSubStreams[i].streamId, frameTimeStamp);
-        }
-
-        res = m_reprocessOps->release_buffer(m_reprocessOps, buf);
-        if (res != NO_ERROR) {
-            ALOGE("ERR(%s): [reprocess] unable to release_buffer : %d",__FUNCTION__ , res);
-            return;
-        }
-        ALOGV("(%s): streamthread[%d] END   SIGNAL_STREAM_REPROCESSING_START",
-            __FUNCTION__,selfThread->m_index);
-
-        /* process next signal */
     }
     if (currentSignal & SIGNAL_STREAM_DATA_COMING) {
         buffer_handle_t * buf = NULL;
@@ -4030,6 +3989,74 @@ void ExynosCameraHWInterface2::m_jpegEncThreadFunc(SignalDrivenThread * self)
         }
         m_jpegEncThread->m_inProgressCount--;
         ALOGV("(%s): END SIGNAL_JPEG_START_ENCODING", __FUNCTION__);
+    }
+    return;
+}
+
+void ExynosCameraHWInterface2::m_miscThreadFunc(SignalDrivenThread *self)
+{
+    uint32_t currentSignal = self->GetProcessingSignal();
+    MiscThread *selfThread = (MiscThread *)self;
+
+    ALOGV("(%s): signal (%x)", __FUNCTION__, currentSignal);
+
+    if (currentSignal & SIGNAL_THREAD_RELEASE) {
+        ALOGV("(%s): START SIGNAL_THREAD_RELEASE", __FUNCTION__);
+
+        ALOGV("(%s): END SIGNAL_THREAD_RELEASE", __FUNCTION__);
+        selfThread->SetSignal(SIGNAL_THREAD_TERMINATE);
+        return;
+    }
+
+    if (currentSignal & SIGNAL_STREAM_REPROCESSING_START) {
+        StreamThread *sccThread = (StreamThread *)(m_streamThreads[1].get());
+        stream_parameters_t *sccStreamParms = &(sccThread->m_parameters);
+        status_t res;
+        buffer_handle_t *buf = NULL;
+        bool found = false;
+        nsecs_t frameTimeStamp;
+
+        ALOGV("(%s):  START SIGNAL_STREAM_REPROCESSING_START", __FUNCTION__);
+
+        m_streamBufferInit(sccThread);
+
+        res = m_reprocessOps->acquire_buffer(m_reprocessOps, &buf);
+        if (res != NO_ERROR || buf == NULL) {
+            ALOGE("(%s): [reprocess] unable to acquire_buffer : %d", __FUNCTION__, res);
+            return;
+        }
+
+        const private_handle_t *priv_handle = reinterpret_cast<const private_handle_t *>(*buf);
+        int checkingIndex = 0;
+        for (checkingIndex = 0; checkingIndex < sccStreamParms->numSvcBuffers; checkingIndex++) {
+            if (priv_handle->fd == sccStreamParms->svcBuffers[checkingIndex].fd.extFd[0]) {
+                found = true;
+                break;
+            }
+        }
+        ALOGV("(%s): dequeued buf %x => found(%d) index(%d)",
+            __FUNCTION__, (unsigned int)buf, found, checkingIndex);
+
+        if (!found)
+            return;
+
+        for (int i = 0; i < NUM_MAX_SUBSTREAM; i++) {
+            if (sccThread->m_attachedSubStreams[i].streamId == -1)
+                continue;
+
+            frameTimeStamp = m_requestManager->GetTimestampByFrameCnt(m_reprocessingFrameCnt);
+            m_requestManager->NotifyStreamOutput(m_reprocessingFrameCnt);
+            if (m_currentReprocessOutStreams & (1 << sccThread->m_attachedSubStreams[i].streamId))
+                m_runSubStreamFunc(sccThread, &(sccStreamParms->svcBuffers[checkingIndex]),
+                    sccThread->m_attachedSubStreams[i].streamId, frameTimeStamp);
+        }
+
+        res = m_reprocessOps->release_buffer(m_reprocessOps, buf);
+        if (res != NO_ERROR) {
+            ALOGE("(%s): [reprocess] unable to release_buffer : %d", __FUNCTION__, res);
+            return;
+        }
+        ALOGV("(%s): END   SIGNAL_STREAM_REPROCESSING_START", __FUNCTION__);
     }
     return;
 }
@@ -5516,6 +5543,17 @@ void ExynosCameraHWInterface2::JpegEncThread::enqueueEncoding(jpegEnc_parameters
     ALOGV("(%s): updated inProgressCount = %d", __FUNCTION__, m_inProgressCount);
     memcpy(&(mHardware->m_jpegEncParameters), parameters, sizeof(jpegEnc_parameters_t));
     SetSignal(SIGNAL_JPEG_START_ENCODING);
+}
+
+ExynosCameraHWInterface2::MiscThread::MiscThread()
+{
+    ALOGV("(%s):", __FUNCTION__);
+}
+
+void ExynosCameraHWInterface2::MiscThread::release()
+{
+    ALOGV("(%s):", __func__);
+    SetSignal(SIGNAL_THREAD_RELEASE);
 }
 
 int ExynosCameraHWInterface2::createIonClient(ion_client ionClient)
