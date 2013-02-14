@@ -4040,13 +4040,11 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
     stream_parameters_t     *selfStreamParms = &(selfThread->m_parameters);
     substream_parameters_t  *subParms        = &m_subStreams[STREAM_ID_JPEG];
     status_t    res;
-    ExynosRect jpegRect;
     bool found = false;
     int srcW, srcH, srcCropX, srcCropY;
     int pictureW, pictureH, pictureFramesize = 0;
     int pictureFormat;
     int cropX, cropY, cropW, cropH = 0;
-    ExynosBuffer resizeBufInfo;
     ExynosRect   m_jpegPictureRect;
     buffer_handle_t * buf = NULL;
 
@@ -4098,6 +4096,9 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
                    0);
     pictureFormat = V4L2_PIX_FMT_YUYV;
     pictureFramesize = FRAME_SIZE(V4L2_PIX_2_HAL_PIXEL_FORMAT(pictureFormat), pictureW, pictureH);
+
+    m_getAlignedYUVSize(V4L2_PIX_FMT_YUYV, m_jpegPictureRect.w, m_jpegPictureRect.h, &m_resizeBuf);
+
     if (m_exynosPictureCSC) {
         float zoom_w = 0, zoom_h = 0;
         if (m_zoomRatio == 0)
@@ -4127,7 +4128,7 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
         csc_set_dst_format(m_exynosPictureCSC,
                            m_jpegPictureRect.w, m_jpegPictureRect.h,
                            0, 0, m_jpegPictureRect.w, m_jpegPictureRect.h,
-                           V4L2_PIX_2_HAL_PIXEL_FORMAT(V4L2_PIX_FMT_NV16),
+                           V4L2_PIX_2_HAL_PIXEL_FORMAT(V4L2_PIX_FMT_YUYV),
                            0);
         for (int i = 0 ; i < 3 ; i++)
             ALOGV("DEBUG(%s): m_pictureBuf.fd.extFd[%d]=%d ",
@@ -4144,13 +4145,7 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
         if (csc_convert(m_exynosPictureCSC) != 0)
             ALOGE("ERR(%s): csc_convert() fail", __FUNCTION__);
 
-        resizeBufInfo = m_resizeBuf;
-
-        m_getAlignedYUVSize(V4L2_PIX_FMT_NV16, m_jpegPictureRect.w, m_jpegPictureRect.h, &m_resizeBuf);
-
-        jpegRect.w = m_jpegPictureRect.w;
-        jpegRect.h = m_jpegPictureRect.h;
-        jpegRect.colorFormat = V4L2_PIX_FMT_NV16;
+        m_jpegPictureRect.colorFormat = V4L2_PIX_FMT_YUYV;
 
         for (int j = 0; j < 3; j++)
             ALOGV("DEBUG(%s): dest buf node  fd.extFd[%d]=%d size=%d virt=%x ",
@@ -4158,12 +4153,11 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
                 (unsigned int)subParms->svcBuffers[subParms->svcBufIndex].size.extS[j],
                 (unsigned int)subParms->svcBuffers[subParms->svcBufIndex].virt.extP[j]);
 
-        m_setExifChangedAttribute(&mExifInfo, &jpegRect, &m_jpegMetadata);
-        m_resizeBuf = resizeBufInfo;
+        m_setExifChangedAttribute(&mExifInfo, &m_jpegPictureRect, &m_jpegMetadata);
 
         jpegEncParms.m_yuvBuf = m_resizeBuf;
         jpegEncParms.m_jpegBuf = subParms->svcBuffers[subParms->svcBufIndex];
-        jpegEncParms.m_rect = jpegRect;
+        jpegEncParms.m_rect = m_jpegPictureRect;
         memcpy(&jpegEncParms.m_exifInfo, &mExifInfo, sizeof(exif_attribute_t));
         jpegEncParms.m_jpegQuality = m_jpegMetadata.shot.ctl.jpeg.quality;
         jpegEncParms.m_thumbQuality = m_jpegMetadata.shot.ctl.jpeg.thumbnailQuality;
