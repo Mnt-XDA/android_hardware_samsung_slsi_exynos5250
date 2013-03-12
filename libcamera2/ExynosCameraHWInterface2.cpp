@@ -537,7 +537,6 @@ int RequestManager::MarkProcessingRequest(ExynosBuffer* buf)
     struct camera2_shot_ext * request_shot;
     int targetStreamIndex = 0;
     request_manager_entry * newEntry = NULL;
-    static int count = 0;
 
     Mutex::Autolock lock(m_requestMutex);
     if (m_numOfEntries == 0)  {
@@ -555,10 +554,10 @@ int RequestManager::MarkProcessingRequest(ExynosBuffer* buf)
     }
 
     int newProcessingIndex = GetNextIndex(m_entryProcessingIndex);
-    ALOGV("DEBUG(%s): index(%d)", __FUNCTION__, newProcessingIndex);
 
     newEntry = &(entries[newProcessingIndex]);
     request_shot = &(newEntry->internal_shot);
+    ALOGV("DEBUG(%s): index(%d) framecount(%d)", __FUNCTION__, newProcessingIndex, request_shot->shot.ctl.request.frameCount);
     if (newEntry->status != REGISTERED) {
         ALOGW("DEBUG(%s)(%d): Circular buffer abnormal, numOfEntries(%d), status(%d)", __FUNCTION__,
                                                 newProcessingIndex, m_numOfEntries, newEntry->status);
@@ -589,12 +588,8 @@ int RequestManager::MarkProcessingRequest(ExynosBuffer* buf)
     if (shot_ext->shot.ctl.stats.faceDetectMode != FACEDETECT_MODE_OFF)
         shot_ext->fd_bypass = 0;
 
-    if (count == 0){
-        shot_ext->shot.ctl.aa.mode = AA_CONTROL_AUTO;
-    } else
-        shot_ext->shot.ctl.aa.mode = AA_CONTROL_NONE;
+    shot_ext->shot.ctl.aa.mode = AA_CONTROL_NONE;
 
-    count++;
     shot_ext->shot.ctl.request.metadataMode = METADATA_MODE_FULL;
     shot_ext->shot.ctl.stats.faceDetectMode = FACEDETECT_MODE_FULL;
     shot_ext->shot.magicNumber = 0x23456789;
@@ -605,7 +600,8 @@ int RequestManager::MarkProcessingRequest(ExynosBuffer* buf)
     shot_ext->isReprocessing = request_shot->isReprocessing;
     shot_ext->reprocessInput = request_shot->reprocessInput;
     if (shot_ext->isReprocessing) {
-        ALOGE("(%s): reprocess request - framecnt(%d)", __FUNCTION__, shot_ext->shot.ctl.request.frameCount);
+        ALOGD("(%s): reprocess request - framecnt(%d)",
+                     __FUNCTION__, shot_ext->shot.ctl.request.frameCount);
         shot_ext->request_scp = 0;
         shot_ext->request_scc = 0;
     }
@@ -639,12 +635,14 @@ void RequestManager::NotifyStreamOutput(uint32_t frameCnt)
 void RequestManager::CheckCompleted(int index)
 {
     if ((entries[index].status == METADONE || entries[index].status == COMPLETED)
-        && (entries[index].output_stream_count <= 0)){
-        ALOGV("(%s): Completed(index:%d)(frameCnt:%d)", __FUNCTION__,
-                index, entries[index].internal_shot.shot.ctl.request.frameCount );
-        entries[index].status = COMPLETED;
-        if (m_lastCompletedFrameCnt + 1 == entries[index].internal_shot.shot.ctl.request.frameCount)
-            m_mainThread->SetSignal(SIGNAL_MAIN_STREAM_OUTPUT_DONE);
+        || (entries[index].status == REQUESTED && entries[index].internal_shot.isReprocessing)) {
+        if (entries[index].output_stream_count <= 0) {
+            ALOGV("(%s): Completed(index:%d)(frameCnt:%d)(reprocess:%d)", __FUNCTION__,
+                    index, entries[index].internal_shot.shot.ctl.request.frameCount, entries[index].internal_shot.isReprocessing);
+            entries[index].status = COMPLETED;
+            if (m_lastCompletedFrameCnt + 1 == entries[index].internal_shot.shot.ctl.request.frameCount)
+                m_mainThread->SetSignal(SIGNAL_MAIN_STREAM_OUTPUT_DONE);
+        }
     }
 }
 
@@ -758,7 +756,6 @@ void    RequestManager::UpdateIspParameters(struct camera2_shot_ext *shot_ext, i
     /* Set Reprocessing */
     shot_ext->isReprocessing = request_shot->isReprocessing;
     shot_ext->reprocessInput = request_shot->reprocessInput;
-    shot_ext->shot.ctl.request.outputStreams[0] = 0;
 
     shot_ext->awb_mode_dm = request_shot->awb_mode_dm;
 
@@ -983,8 +980,6 @@ int     RequestManager::FindFrameCnt(struct camera2_shot_ext * shot_ext)
             entries[i].status = CAPTURED;
             return entries[i].internal_shot.shot.ctl.request.frameCount;
         }
-        ALOGE("ERR(%s): frameCount(%d), index(%d), status(%d)", __FUNCTION__, shot_ext->shot.ctl.request.frameCount, i, entries[i].status);
-
     }
     ALOGV("(%s): No Entry found frame count(%d)", __FUNCTION__, shot_ext->shot.ctl.request.frameCount);
 
@@ -1001,10 +996,13 @@ void     RequestManager::SetInitialSkip(int count)
 int     RequestManager::GetSkipCnt()
 {
     ALOGV("(%s): skip cnt(%d)", __FUNCTION__, m_sensorPipelineSkipCnt);
-    if (m_sensorPipelineSkipCnt == 0)
-        return m_sensorPipelineSkipCnt;
-    else
-        return --m_sensorPipelineSkipCnt;
+    return m_sensorPipelineSkipCnt;
+}
+
+void RequestManager::DecreaseSkipCnt()
+{
+    m_sensorPipelineSkipCnt--;
+    ALOGV("(%s): decreased skip cnt(%d)", __FUNCTION__, m_sensorPipelineSkipCnt);
 }
 
 void RequestManager::Dump(void)
@@ -1056,20 +1054,17 @@ ExynosCameraHWInterface2::ExynosCameraHWInterface2(int cameraId, camera2_device_
             m_requestQueueOps(NULL),
             m_frameQueueOps(NULL),
             m_callbackCookie(NULL),
-            m_numOfRemainingReqInSvc(0),
-            m_isRequestQueuePending(false),
             m_isRequestQueueNull(true),
             m_halDevice(dev),
             m_ionCameraClient(0),
             m_isIspStarted(false),
             m_sccLocalBufferValid(false),
             m_cameraId(cameraId),
-            m_scp_closing(false),
-            m_scp_closed(false),
             m_wideAspect(false),
             m_zoomRatio(1),
             m_vdisBubbleCnt(0),
             m_vdisDupFrame(0),
+            m_isAlreadyRegistered(false),
             m_scpForceSuspended(false),
             m_afState(HAL_AFSTATE_INACTIVE),
             m_afTriggerId(0),
@@ -1099,8 +1094,6 @@ ExynosCameraHWInterface2::ExynosCameraHWInterface2(int cameraId, camera2_device_
     if(m_ionCameraClient == 0)
         ALOGE("ERR(%s):Fail on ion_client_create", __FUNCTION__);
 
-
-    m_BayerManager = new BayerBufManager();
     m_mainThread    = new MainThread(this);
     m_requestManager = new RequestManager((SignalDrivenThread*)(m_mainThread.get()));
     *openInvalid = InitializeISPChain();
@@ -1136,6 +1129,9 @@ ExynosCameraHWInterface2::ExynosCameraHWInterface2(int cameraId, camera2_device_
 
         m_jpegEncThread = new JpegEncThread(this);
         m_jpegEncThread->Start("JpegEncThread", PRIORITY_DEFAULT, 0);
+
+        m_miscThread = new MiscThread(this);
+        m_miscThread->Start("MiscThread", PRIORITY_DEFAULT, 0);
 
         for (int i = 0 ; i < STREAM_ID_LAST+1 ; i++)
             m_subStreams[i].type =  SUBSTREAM_TYPE_NONE;
@@ -1206,6 +1202,9 @@ void ExynosCameraHWInterface2::release()
         m_jpegEncThread->release();
     }
 
+    if (m_miscThread != NULL)
+        m_miscThread->release();
+
     if (m_exynosPictureCSC)
         csc_deinit(m_exynosPictureCSC);
     m_exynosPictureCSC = NULL;
@@ -1251,10 +1250,6 @@ void ExynosCameraHWInterface2::release()
         m_requestManager = NULL;
     }
 
-    if (m_BayerManager != NULL) {
-        delete m_BayerManager;
-        m_BayerManager = NULL;
-    }
     for (i = 0; i < NUM_BAYER_BUFFERS; i++)
         freeCameraMemory(&m_camera_info.sensor.buffer[i], m_camera_info.sensor.planes);
 
@@ -1369,8 +1364,10 @@ int ExynosCameraHWInterface2::InitializeISPChain()
 
     /*sensor setting*/
     m_camera_info.dummy_shot.shot.ctl.sensor.exposureTime = 0;
-    m_camera_info.dummy_shot.shot.ctl.sensor.frameDuration = 0;
+    m_camera_info.dummy_shot.shot.ctl.sensor.frameDuration = 33 * 1000 * 1000;
     m_camera_info.dummy_shot.shot.ctl.sensor.sensitivity = 0;
+
+    m_camera_info.dummy_shot.shot.ctl.request.frameCount = -1;
 
     m_camera_info.dummy_shot.shot.ctl.scaler.cropRegion[0] = 0;
     m_camera_info.dummy_shot.shot.ctl.scaler.cropRegion[1] = 0;
@@ -1380,6 +1377,9 @@ int ExynosCameraHWInterface2::InitializeISPChain()
     m_camera_info.dummy_shot.request_scc = 0;
     m_camera_info.dummy_shot.request_scp = 0;
     m_camera_info.dummy_shot.shot.ctl.request.outputStreams[0] = 0;
+
+    m_camera_info.dummy_shot.shot.ctl.aa.aeTargetFpsRange[0] = 30;
+    m_camera_info.dummy_shot.shot.ctl.aa.aeTargetFpsRange[1] = 30;
 
     m_camera_info.sensor.width = m_camera2->getSensorRawW();
     m_camera_info.sensor.height = m_camera2->getSensorRawH();
@@ -1436,17 +1436,13 @@ int ExynosCameraHWInterface2::InitializeISPChain()
     ALOGV("DEBUG(%s): sensor s_fmt done",  __FUNCTION__);
     cam_int_reqbufs(&(m_camera_info.sensor));
     ALOGV("DEBUG(%s): sensor reqbuf done",  __FUNCTION__);
-    for (i = 0; i < m_camera_info.sensor.buffers; i++) {
-        ALOGV("DEBUG(%s): sensor initial QBUF [%d]",  __FUNCTION__, i);
-        m_camera_info.dummy_shot.shot.ctl.sensor.frameDuration = 33*1000*1000; // apply from frame #1
-        m_camera_info.dummy_shot.shot.ctl.request.frameCount = -1;
+    for (i = 0; i < m_camera_info.sensor.buffers; i++)
         memcpy( m_camera_info.sensor.buffer[i].virt.extP[1], &(m_camera_info.dummy_shot),
                 sizeof(struct camera2_shot_ext));
-    }
-
-    for (i = 0; i < NUM_MIN_SENSOR_QBUF; i++)
+    for (i = 0; i < NUM_MIN_SENSOR_QBUF; i++) {
+        ALOGV("(%s): sensor initial QBUF [%d]",  __FUNCTION__, i);
         cam_int_qbuf(&(m_camera_info.sensor), i);
-
+    }
     for (i = NUM_MIN_SENSOR_QBUF; i < m_camera_info.sensor.buffers; i++)
         m_requestManager->pushSensorQ(i);
 
@@ -1577,7 +1573,7 @@ int ExynosCameraHWInterface2::notifyRequestQueueNotEmpty()
 {
     int i = 0;
 
-    ALOGV("DEBUG(%s):setting [SIGNAL_MAIN_REQ_Q_NOT_EMPTY] current(%d)", __FUNCTION__, m_requestManager->GetNumEntries());
+    ALOGV("(%s): START current num of entries(%d)", __FUNCTION__, m_requestManager->GetNumEntries());
     if ((NULL==m_frameQueueOps)|| (NULL==m_requestQueueOps)) {
         ALOGE("DEBUG(%s):queue ops NULL. ignoring request", __FUNCTION__);
         return 0;
@@ -1598,16 +1594,13 @@ int ExynosCameraHWInterface2::notifyRequestQueueNotEmpty()
             cam_int_s_fmt(&(m_camera_info.sensor));
             cam_int_reqbufs(&(m_camera_info.sensor));
 
-            for (i = 0; i < m_camera_info.sensor.buffers; i++) {
-                ALOGV("DEBUG(%s): sensor initial QBUF [%d]",  __FUNCTION__, i);
-                m_camera_info.dummy_shot.shot.ctl.sensor.frameDuration = 33*1000*1000; // apply from frame #1
-                m_camera_info.dummy_shot.shot.ctl.request.frameCount = -1;
+            for (i = 0; i < m_camera_info.sensor.buffers; i++)
                 memcpy( m_camera_info.sensor.buffer[i].virt.extP[1], &(m_camera_info.dummy_shot),
                         sizeof(struct camera2_shot_ext));
-            }
-            for (i = 0; i < NUM_MIN_SENSOR_QBUF; i++)
+            for (i = 0; i < NUM_MIN_SENSOR_QBUF; i++) {
+                ALOGV("(%s): sensor initial QBUF [%d]",  __FUNCTION__, i);
                 cam_int_qbuf(&(m_camera_info.sensor), i);
-
+            }
             for (i = NUM_MIN_SENSOR_QBUF; i < m_camera_info.sensor.buffers; i++)
                 m_requestManager->pushSensorQ(i);
             ALOGV("DEBUG(%s): calling sensor streamon", __FUNCTION__);
@@ -1689,11 +1682,11 @@ int ExynosCameraHWInterface2::notifyRequestQueueNotEmpty()
     if (m_isIspStarted == false) {
         StartISP();
         ALOGV("DEBUG(%s):starting sensor thread", __FUNCTION__);
-        m_requestManager->SetInitialSkip(6);
+        m_requestManager->SetInitialSkip(3);
         m_sensorThread->Start("SensorThread", PRIORITY_DEFAULT, 0);
         m_isIspStarted = true;
     }
-    m_mainThread->SetSignal(SIGNAL_MAIN_REQ_Q_NOT_EMPTY);
+    m_sensorThread->SetSignal(SIGNAL_SENSOR_START_REQ_PROCESSING);
     return 0;
 }
 
@@ -1802,7 +1795,7 @@ int ExynosCameraHWInterface2::allocateStream(uint32_t width, uint32_t height, in
             m_streamThreadInitialize((SignalDrivenThread*)AllocatedStream);
 
             *format_actual                      = HAL_PIXEL_FORMAT_EXYNOS_YV12;
-            *usage                              = GRALLOC_USAGE_SW_WRITE_OFTEN;
+            *usage                              = 0;
             *max_buffers                        = 6;
 
             newParameters.width                 = width;
@@ -1847,7 +1840,7 @@ int ExynosCameraHWInterface2::allocateStream(uint32_t width, uint32_t height, in
             }
 
             *format_actual = HAL_PIXEL_FORMAT_YCbCr_420_SP; // NV12M
-            *usage = GRALLOC_USAGE_SW_WRITE_OFTEN;
+            *usage = 0;
             *max_buffers = 6;
 
             subParameters->type         = SUBSTREAM_TYPE_RECORD;
@@ -1891,11 +1884,8 @@ int ExynosCameraHWInterface2::allocateStream(uint32_t width, uint32_t height, in
             AllocatedStream->Start("StreamThread", PRIORITY_DEFAULT, 0);
             m_streamThreadInitialize((SignalDrivenThread*)AllocatedStream);
 
-            *format_actual                      = HAL_PIXEL_FORMAT_EXYNOS_YV12;
-            *max_buffers                        = 6;
-
             *format_actual = HAL_PIXEL_FORMAT_YCbCr_422_I; // YUYV
-            *usage = GRALLOC_USAGE_SW_WRITE_OFTEN;
+            *usage = 0;
             *max_buffers = 6;
 
             newParameters.width                 = width;
@@ -1944,11 +1934,8 @@ int ExynosCameraHWInterface2::allocateStream(uint32_t width, uint32_t height, in
 
             m_streamThreadInitialize((SignalDrivenThread*)AllocatedStream);
 
-            *format_actual                      = HAL_PIXEL_FORMAT_EXYNOS_YV12;
-            *max_buffers                        = 6;
-
             *format_actual = HAL_PIXEL_FORMAT_YCbCr_422_I; // YUYV
-            *usage = GRALLOC_USAGE_SW_WRITE_OFTEN;
+            *usage = 0;
             *max_buffers = 6;
 
             newParameters.width                 = width;
@@ -2000,7 +1987,7 @@ int ExynosCameraHWInterface2::allocateStream(uint32_t width, uint32_t height, in
         parentStream = (StreamThread*)(m_streamThreads[1].get());
 
         *format_actual = HAL_PIXEL_FORMAT_BLOB;
-        *usage = GRALLOC_USAGE_SW_WRITE_OFTEN;
+        *usage = GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN;
         *max_buffers = 4;
 
         subParameters->type          = SUBSTREAM_TYPE_JPEG;
@@ -2036,7 +2023,7 @@ int ExynosCameraHWInterface2::allocateStream(uint32_t width, uint32_t height, in
         }
 
         *format_actual = format;
-        *usage = GRALLOC_USAGE_SW_WRITE_OFTEN;
+        *usage = GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN;
         *max_buffers = 6;
 
         subParameters->type         = SUBSTREAM_TYPE_PRVCB;
@@ -2631,183 +2618,8 @@ bool ExynosCameraHWInterface2::m_getRatioSize(int  src_w,  int   src_h,
     return true;
 }
 
-BayerBufManager::BayerBufManager()
-{
-    ALOGV("DEBUG(%s): ", __FUNCTION__);
-    for (int i = 0; i < NUM_BAYER_BUFFERS ; i++) {
-        entries[i].status = BAYER_ON_HAL_EMPTY;
-        entries[i].reqFrameCnt = 0;
-    }
-    sensorEnqueueHead = 0;
-    sensorDequeueHead = 0;
-    ispEnqueueHead = 0;
-    ispDequeueHead = 0;
-    numOnSensor = 0;
-    numOnIsp = 0;
-    numOnHalFilled = 0;
-    numOnHalEmpty = NUM_BAYER_BUFFERS;
-}
-
-BayerBufManager::~BayerBufManager()
-{
-    ALOGV("%s", __FUNCTION__);
-}
-
-int     BayerBufManager::GetIndexForSensorEnqueue()
-{
-    int ret = 0;
-    if (numOnHalEmpty == 0)
-        ret = -1;
-    else
-        ret = sensorEnqueueHead;
-    ALOGV("DEBUG(%s): returning (%d)", __FUNCTION__, ret);
-    return ret;
-}
-
-int    BayerBufManager::MarkSensorEnqueue(int index)
-{
-    ALOGV("DEBUG(%s)    : BayerIndex[%d] ", __FUNCTION__, index);
-
-    // sanity check
-    if (index != sensorEnqueueHead) {
-        ALOGV("DEBUG(%s)    : Abnormal BayerIndex[%d] - expected[%d]", __FUNCTION__, index, sensorEnqueueHead);
-        return -1;
-    }
-    if (entries[index].status != BAYER_ON_HAL_EMPTY) {
-        ALOGV("DEBUG(%s)    : Abnormal status in BayerIndex[%d] = (%d) expected (%d)", __FUNCTION__,
-            index, entries[index].status, BAYER_ON_HAL_EMPTY);
-        return -1;
-    }
-
-    entries[index].status = BAYER_ON_SENSOR;
-    entries[index].reqFrameCnt = 0;
-    numOnHalEmpty--;
-    numOnSensor++;
-    sensorEnqueueHead = GetNextIndex(index);
-    ALOGV("DEBUG(%s) END: HAL-e(%d) HAL-f(%d) Sensor(%d) ISP(%d) ",
-        __FUNCTION__, numOnHalEmpty, numOnHalFilled, numOnSensor, numOnIsp);
-    return 0;
-}
-
-int    BayerBufManager::MarkSensorDequeue(int index, int reqFrameCnt, nsecs_t *timeStamp)
-{
-    ALOGV("DEBUG(%s)    : BayerIndex[%d] reqFrameCnt(%d)", __FUNCTION__, index, reqFrameCnt);
-
-    if (entries[index].status != BAYER_ON_SENSOR) {
-        ALOGE("DEBUG(%s)    : Abnormal status in BayerIndex[%d] = (%d) expected (%d)", __FUNCTION__,
-            index, entries[index].status, BAYER_ON_SENSOR);
-        return -1;
-    }
-
-    entries[index].status = BAYER_ON_HAL_FILLED;
-    numOnHalFilled++;
-    numOnSensor--;
-
-    return 0;
-}
-
-int     BayerBufManager::GetIndexForIspEnqueue(int *reqFrameCnt)
-{
-    int ret = 0;
-    if (numOnHalFilled == 0)
-        ret = -1;
-    else {
-        *reqFrameCnt = entries[ispEnqueueHead].reqFrameCnt;
-        ret = ispEnqueueHead;
-    }
-    ALOGV("DEBUG(%s): returning BayerIndex[%d]", __FUNCTION__, ret);
-    return ret;
-}
-
-int     BayerBufManager::GetIndexForIspDequeue(int *reqFrameCnt)
-{
-    int ret = 0;
-    if (numOnIsp == 0)
-        ret = -1;
-    else {
-        *reqFrameCnt = entries[ispDequeueHead].reqFrameCnt;
-        ret = ispDequeueHead;
-    }
-    ALOGV("DEBUG(%s): returning BayerIndex[%d]", __FUNCTION__, ret);
-    return ret;
-}
-
-int    BayerBufManager::MarkIspEnqueue(int index)
-{
-    ALOGV("DEBUG(%s)    : BayerIndex[%d] ", __FUNCTION__, index);
-
-    // sanity check
-    if (index != ispEnqueueHead) {
-        ALOGV("DEBUG(%s)    : Abnormal BayerIndex[%d] - expected[%d]", __FUNCTION__, index, ispEnqueueHead);
-        return -1;
-    }
-    if (entries[index].status != BAYER_ON_HAL_FILLED) {
-        ALOGV("DEBUG(%s)    : Abnormal status in BayerIndex[%d] = (%d) expected (%d)", __FUNCTION__,
-            index, entries[index].status, BAYER_ON_HAL_FILLED);
-        return -1;
-    }
-
-    entries[index].status = BAYER_ON_ISP;
-    numOnHalFilled--;
-    numOnIsp++;
-    ispEnqueueHead = GetNextIndex(index);
-    ALOGV("DEBUG(%s) END: HAL-e(%d) HAL-f(%d) Sensor(%d) ISP(%d) ",
-        __FUNCTION__, numOnHalEmpty, numOnHalFilled, numOnSensor, numOnIsp);
-    return 0;
-}
-
-int    BayerBufManager::MarkIspDequeue(int index)
-{
-    ALOGV("DEBUG(%s)    : BayerIndex[%d]", __FUNCTION__, index);
-
-    // sanity check
-    if (index != ispDequeueHead) {
-        ALOGV("DEBUG(%s)    : Abnormal BayerIndex[%d] - expected[%d]", __FUNCTION__, index, ispDequeueHead);
-        return -1;
-    }
-    if (entries[index].status != BAYER_ON_ISP) {
-        ALOGV("DEBUG(%s)    : Abnormal status in BayerIndex[%d] = (%d) expected (%d)", __FUNCTION__,
-            index, entries[index].status, BAYER_ON_ISP);
-        return -1;
-    }
-
-    entries[index].status = BAYER_ON_HAL_EMPTY;
-    entries[index].reqFrameCnt = 0;
-    numOnHalEmpty++;
-    numOnIsp--;
-    ispDequeueHead = GetNextIndex(index);
-    ALOGV("DEBUG(%s) END: HAL-e(%d) HAL-f(%d) Sensor(%d) ISP(%d) ",
-        __FUNCTION__, numOnHalEmpty, numOnHalFilled, numOnSensor, numOnIsp);
-    return 0;
-}
-
-int BayerBufManager::GetNumOnSensor()
-{
-    return numOnSensor;
-}
-
-int BayerBufManager::GetNumOnHalFilled()
-{
-    return numOnHalFilled;
-}
-
-int BayerBufManager::GetNumOnIsp()
-{
-    return numOnIsp;
-}
-
-int     BayerBufManager::GetNextIndex(int index)
-{
-    index++;
-    if (index >= NUM_BAYER_BUFFERS)
-        index = 0;
-
-    return index;
-}
-
 void ExynosCameraHWInterface2::m_mainThreadFunc(SignalDrivenThread * self)
 {
-    camera_metadata_t *currentRequest = NULL;
     camera_metadata_t *currentFrame = NULL;
     size_t numEntries = 0;
     size_t frameSize = 0;
@@ -2818,7 +2630,6 @@ void ExynosCameraHWInterface2::m_mainThreadFunc(SignalDrivenThread * self)
     int res = 0;
 
     int ret;
-    int afMode;
 
     ALOGV("DEBUG(%s): m_mainThreadFunc (%x)", __FUNCTION__, currentSignal);
 
@@ -2828,36 +2639,6 @@ void ExynosCameraHWInterface2::m_mainThreadFunc(SignalDrivenThread * self)
         ALOGV("DEBUG(%s): processing SIGNAL_THREAD_RELEASE DONE", __FUNCTION__);
         selfThread->SetSignal(SIGNAL_THREAD_TERMINATE);
         return;
-    }
-
-    if (currentSignal & SIGNAL_MAIN_REQ_Q_NOT_EMPTY) {
-        ALOGV("DEBUG(%s): MainThread processing SIGNAL_MAIN_REQ_Q_NOT_EMPTY", __FUNCTION__);
-        if (m_requestManager->IsRequestQueueFull()==false) {
-            Mutex::Autolock lock(m_TriggerLock);
-            m_requestQueueOps->dequeue_request(m_requestQueueOps, &currentRequest);
-            if (NULL == currentRequest) {
-                ALOGD("DEBUG(%s)(0x%x): No more service requests left in the queue ", __FUNCTION__, currentSignal);
-                m_isRequestQueueNull = true;
-                if (m_requestManager->IsVdisEnable())
-                    m_vdisBubbleCnt = 1;
-            }
-            else {
-                m_requestManager->RegisterRequest(currentRequest, &afMode, m_currentAfRegion);
-
-                if (afMode != -1)
-                    SetAfMode((enum aa_afmode)afMode);
-
-                m_numOfRemainingReqInSvc = m_requestQueueOps->request_count(m_requestQueueOps);
-                ALOGV("DEBUG(%s): remaining req cnt (%d)", __FUNCTION__, m_numOfRemainingReqInSvc);
-                if (m_requestManager->IsRequestQueueFull()==false)
-                    selfThread->SetSignal(SIGNAL_MAIN_REQ_Q_NOT_EMPTY); // dequeue repeatedly
-
-                m_sensorThread->SetSignal(SIGNAL_SENSOR_START_REQ_PROCESSING);
-            }
-        }
-        else {
-            m_isRequestQueuePending = true;
-        }
     }
 
     if (currentSignal & SIGNAL_MAIN_STREAM_OUTPUT_DONE) {
@@ -2891,14 +2672,6 @@ void ExynosCameraHWInterface2::m_mainThreadFunc(SignalDrivenThread * self)
             else {
                 ALOGE("ERR(%s): frame metadata append fail (%d)",__FUNCTION__, res);
             }
-        }
-        if (!m_isRequestQueueNull) {
-            selfThread->SetSignal(SIGNAL_MAIN_REQ_Q_NOT_EMPTY);
-        }
-
-        if (getInProgressCount()>0) {
-            ALOGV("DEBUG(%s): STREAM_OUTPUT_DONE and signalling REQ_PROCESSING",__FUNCTION__);
-            m_sensorThread->SetSignal(SIGNAL_SENSOR_START_REQ_PROCESSING);
         }
     }
     ALOGV("DEBUG(%s): MainThread Exit", __FUNCTION__);
@@ -3125,6 +2898,8 @@ void ExynosCameraHWInterface2::m_setShotFrameDuration(struct camera2_shot_ext *s
     shot_ext->shot.ctl.sensor.frameDuration = frameDuration;
     /* Set max fps to 30, ISP controls fps by fps range[0] and frameduration */
     shot_ext->shot.ctl.aa.aeTargetFpsRange[1] = 30;
+    if (m_requestManager->GetSkipCnt() > 0)
+        shot_ext->shot.ctl.aa.aeTargetFpsRange[0] = 30;
 }
 
 void ExynosCameraHWInterface2::m_controlFlashTorch(struct camera2_shot_ext *shot_ext)
@@ -3361,7 +3136,7 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
     uint32_t        currentSignal = self->GetProcessingSignal();
     SensorThread *  selfThread      = ((SensorThread*)self);
     int index;
-    int index_isp;
+    int index_isp, index_sensor_qbuf;
     nsecs_t frameTime;
 
     ALOGV("DEBUG(%s): m_sensorThreadFunc (%x)", __FUNCTION__, currentSignal);
@@ -3403,16 +3178,96 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
         int targetStreamIndex = 0, i=0;
         int matchedFrameCnt = -1, processingReqIndex;
         struct camera2_shot_ext *shot_ext;
+        struct camera2_shot_ext *shot_ext_sensor_qbuf;
         struct camera2_shot_ext *shot_ext_capture;
+        camera_metadata_t *currentRequest = NULL;
         bool triggered = false;
         bool rawDumpMode = false;
+        int afMode;
 
         /* dqbuf from sensor */
         ALOGV("Sensor DQbuf start");
         index = cam_int_dqbuf(&(m_camera_info.sensor));
         m_requestManager->pushSensorQ(index);
-        ALOGV("Sensor DQbuf done(%d)", index);
         shot_ext = (struct camera2_shot_ext *)(m_camera_info.sensor.buffer[index].virt.extP[1]);
+        ALOGV("Sensor DQbuf done index(%d)", index);
+
+        index_sensor_qbuf = m_requestManager->popSensorQ();
+        if (index_sensor_qbuf < 0){
+            ALOGE("sensorQ is empty");
+            return;
+        }
+
+        if (m_isAlreadyRegistered) {
+            ALOGD("(%s): previously registered request exists", __FUNCTION__);
+        } else {
+            if (!m_isRequestQueueNull && !(m_requestManager->IsRequestQueueFull())) {
+                Mutex::Autolock lock(m_TriggerLock);
+                m_requestQueueOps->dequeue_request(m_requestQueueOps, &currentRequest);
+                if (NULL == currentRequest) {
+                    ALOGD("(%s): No more service requests left in the queue", __FUNCTION__);
+                    m_isRequestQueueNull = true;
+                    if (m_requestManager->IsVdisEnable()) {
+                        ALOGD("(%s): enabling vdis bubble", __FUNCTION__);
+                        m_vdisBubbleCnt = 1;
+                    }
+                } else {
+                    m_requestManager->RegisterRequest(currentRequest, &afMode, m_currentAfRegion);
+
+                    if (afMode != -1)
+                        SetAfMode((enum aa_afmode)afMode);
+
+                    ALOGV("(%s): remaining req cnt (%d)", __FUNCTION__, m_requestQueueOps->request_count(m_requestQueueOps));
+                }
+            }
+        }
+
+        if (m_vdisBubbleCnt == 0)
+            processingReqIndex = m_requestManager->MarkProcessingRequest(&(m_camera_info.sensor.buffer[index_sensor_qbuf]));
+        else
+            processingReqIndex = -1;
+        shot_ext_sensor_qbuf = (struct camera2_shot_ext *)(m_camera_info.sensor.buffer[index_sensor_qbuf].virt.extP[1]);
+
+        m_isAlreadyRegistered = false;
+        if (processingReqIndex >= 0 && shot_ext_sensor_qbuf->isReprocessing) {
+            struct camera2_shot_ext *next_shot_ext;
+            ALOGV("(%s): Sending signal for Reprocess request", __FUNCTION__);
+            m_currentReprocessOutStreams = shot_ext_sensor_qbuf->shot.ctl.request.outputStreams[0];
+            shot_ext_sensor_qbuf->request_scp = 0;
+            shot_ext_sensor_qbuf->request_scc = 0;
+            m_reprocessingFrameCnt = shot_ext_sensor_qbuf->shot.ctl.request.frameCount;
+            memcpy(&m_jpegMetadata, (void*)(m_requestManager->GetInternalShotExtByFrameCnt(m_reprocessingFrameCnt)),
+                sizeof(struct camera2_shot_ext));
+            m_miscThread->SetSignal(SIGNAL_STREAM_REPROCESSING_START);
+
+            if (!m_isRequestQueueNull && !(m_requestManager->IsRequestQueueFull())) {
+                Mutex::Autolock lock(m_TriggerLock);
+                m_requestQueueOps->dequeue_request(m_requestQueueOps, &currentRequest);
+                if (NULL == currentRequest) {
+                    ALOGD("(%s): ## No more service requests left in the queue", __FUNCTION__);
+                    m_isRequestQueueNull = true;
+                    if (m_requestManager->IsVdisEnable()) {
+                        ALOGD("(%s): ## enabling vdis bubble", __FUNCTION__);
+                        m_vdisBubbleCnt = 1;
+                    }
+                } else {
+                    m_requestManager->RegisterRequest(currentRequest, &afMode, m_currentAfRegion);
+                    if (afMode != -1)
+                        SetAfMode((enum aa_afmode)afMode);
+
+                    next_shot_ext = m_requestManager->GetInternalShotExtByFrameCnt(m_reprocessingFrameCnt + 1);
+                    if (next_shot_ext && !(next_shot_ext->isReprocessing)) {
+                        ALOGV("(%s): Processing next request", __FUNCTION__);
+                        processingReqIndex = m_requestManager->MarkProcessingRequest(&(m_camera_info.sensor.buffer[index_sensor_qbuf]));
+                        m_isAlreadyRegistered = false;
+                    } else {
+                        m_isAlreadyRegistered = true;
+                    }
+                }
+            }
+        }
+        cam_int_qbuf(&(m_camera_info.sensor), index_sensor_qbuf);
+        ALOGV("Sensor Qbuf done(%d)", index_sensor_qbuf);
 
         if (m_nightCaptureCnt != 0) {
             matchedFrameCnt = m_nightCaptureFrameCnt;
@@ -3570,15 +3425,6 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
                 m_streamThreads[0]->SetSignal(SIGNAL_STREAM_DATA_COMING);
             }
 
-            ALOGV("(%s): SCP_CLOSING check sensor(%d) scc(%d) scp(%d) ", __FUNCTION__,
-               shot_ext->request_sensor, shot_ext->request_scc, shot_ext->request_scp);
-            if (shot_ext->request_scc + shot_ext->request_scp + shot_ext->request_sensor == 0) {
-                ALOGV("(%s): SCP_CLOSING check OK ", __FUNCTION__);
-                m_scp_closed = true;
-            }
-            else
-                m_scp_closed = false;
-
             OnAfNotification(shot_ext->shot.dm.aa.afState);
             OnPrecaptureMeteringNotificationISP();
         }   else {
@@ -3621,45 +3467,14 @@ void ExynosCameraHWInterface2::m_sensorThreadFunc(SignalDrivenThread * self)
             OnAfNotification(shot_ext->shot.dm.aa.afState);
         }
 
-        index = m_requestManager->popSensorQ();
-        if(index < 0){
-            ALOGE("sensorQ is empty");
-            return;
-        }
-
-        processingReqIndex = m_requestManager->MarkProcessingRequest(&(m_camera_info.sensor.buffer[index]));
-        shot_ext = (struct camera2_shot_ext *)(m_camera_info.sensor.buffer[index].virt.extP[1]);
-        if (shot_ext->isReprocessing) {
-            ALOGV("(%s): Sending signal for Reprocess request", __FUNCTION__);
-            m_currentReprocessOutStreams = shot_ext->shot.ctl.request.outputStreams[0];
-            shot_ext->request_scp = 0;
-            shot_ext->request_scc = 0;
-            m_reprocessingFrameCnt = shot_ext->shot.ctl.request.frameCount;
-            memcpy(&m_jpegMetadata, (void*)(m_requestManager->GetInternalShotExtByFrameCnt(m_reprocessingFrameCnt)),
-                sizeof(struct camera2_shot_ext));
-            m_streamThreads[1]->SetSignal(SIGNAL_STREAM_REPROCESSING_START);
-        }
-        if (m_scp_closing || m_scp_closed) {
-            ALOGD("(%s): SCP_CLOSING(%d) SCP_CLOSED(%d)", __FUNCTION__, m_scp_closing, m_scp_closed);
-            shot_ext->request_scc = 0;
-            shot_ext->request_scp = 0;
-            shot_ext->request_sensor = 0;
-        }
-        cam_int_qbuf(&(m_camera_info.sensor), index);
-        ALOGV("Sensor Qbuf done(%d)", index);
-
-        if (!m_scp_closing
-            && ((matchedFrameCnt == -1) || (processingReqIndex == -1))){
-            ALOGV("make bubble shot: matchedFramcnt(%d) processingReqIndex(%d)",
-                                    matchedFrameCnt, processingReqIndex);
-            selfThread->SetSignal(SIGNAL_SENSOR_START_REQ_PROCESSING);
-        }
+        selfThread->SetSignal(SIGNAL_SENSOR_START_REQ_PROCESSING);
     }
     return;
 }
 
 void ExynosCameraHWInterface2::m_streamBufferInit(SignalDrivenThread *self)
 {
+    Mutex::Autolock lock(m_streamInitLock);
     uint32_t                currentSignal   = self->GetProcessingSignal();
     StreamThread *          selfThread      = ((StreamThread*)self);
     stream_parameters_t     *selfStreamParms =  &(selfThread->m_parameters);
@@ -3769,7 +3584,7 @@ void ExynosCameraHWInterface2::m_streamBufferInit(SignalDrivenThread *self)
                 m_resizeBuf.size.extS[1] = 0;
                 m_resizeBuf.size.extS[2] = 0;
 
-                if (allocCameraMemory(m_ionCameraClient, &m_resizeBuf, 1) == -1) {
+                if (allocCameraMemory(m_ionCameraClient, &m_resizeBuf, 1, 1 << 0) == -1) {
                     ALOGE("ERR(%s): Failed to allocate resize buf", __FUNCTION__);
                 }
             }
@@ -3860,51 +3675,6 @@ void ExynosCameraHWInterface2::m_streamFunc_direct(SignalDrivenThread *self)
         ALOGV("(%s): [%d] END  SIGNAL_THREAD_RELEASE", __FUNCTION__, selfThread->m_index);
         return;
     }
-    if (currentSignal & SIGNAL_STREAM_REPROCESSING_START) {
-        status_t    res;
-        buffer_handle_t * buf = NULL;
-        bool found = false;
-        ALOGV("(%s): streamthread[%d] START SIGNAL_STREAM_REPROCESSING_START",
-            __FUNCTION__, selfThread->m_index);
-        res = m_reprocessOps->acquire_buffer(m_reprocessOps, &buf);
-        if (res != NO_ERROR || buf == NULL) {
-            ALOGE("ERR(%s): [reprocess] unable to acquire_buffer : %d",__FUNCTION__ , res);
-            return;
-        }
-        const private_handle_t *priv_handle = reinterpret_cast<const private_handle_t *>(*buf);
-        int checkingIndex = 0;
-        for (checkingIndex = 0; checkingIndex < selfStreamParms->numSvcBuffers ; checkingIndex++) {
-            if (priv_handle->fd == selfStreamParms->svcBuffers[checkingIndex].fd.extFd[0] ) {
-                found = true;
-                break;
-            }
-        }
-        ALOGV("DEBUG(%s): dequeued buf %x => found(%d) index(%d) ",
-            __FUNCTION__, (unsigned int)buf, found, checkingIndex);
-
-        if (!found) return;
-
-        for (int i = 0 ; i < NUM_MAX_SUBSTREAM ; i++) {
-            if (selfThread->m_attachedSubStreams[i].streamId == -1)
-                continue;
-
-            frameTimeStamp = m_requestManager->GetTimestampByFrameCnt(m_reprocessingFrameCnt);
-            m_requestManager->NotifyStreamOutput(m_reprocessingFrameCnt);
-            if (m_currentReprocessOutStreams & (1<<selfThread->m_attachedSubStreams[i].streamId))
-                m_runSubStreamFunc(selfThread, &(selfStreamParms->svcBuffers[checkingIndex]),
-                    selfThread->m_attachedSubStreams[i].streamId, frameTimeStamp);
-        }
-
-        res = m_reprocessOps->release_buffer(m_reprocessOps, buf);
-        if (res != NO_ERROR) {
-            ALOGE("ERR(%s): [reprocess] unable to release_buffer : %d",__FUNCTION__ , res);
-            return;
-        }
-        ALOGV("(%s): streamthread[%d] END   SIGNAL_STREAM_REPROCESSING_START",
-            __FUNCTION__,selfThread->m_index);
-
-        /* process next signal */
-    }
     if (currentSignal & SIGNAL_STREAM_DATA_COMING) {
         buffer_handle_t * buf = NULL;
         status_t res = 0;
@@ -3938,8 +3708,8 @@ void ExynosCameraHWInterface2::m_streamFunc_direct(SignalDrivenThread *self)
                     m_requestManager->NotifyStreamOutput(frame->rcount);
             }
 
-            ALOGV("DEBUG(%s): streamthread[%d] DQBUF done index(%d)  sigcnt(%d)",__FUNCTION__,
-                selfThread->m_index, selfStreamParms->bufIndex, m_scpOutputSignalCnt);
+            ALOGV("(%s): streamthread[%d] DQBUF done index(%d)", __FUNCTION__,
+                selfThread->m_index, selfStreamParms->bufIndex);
 
             if (selfStreamParms->svcBufStatus[selfStreamParms->bufIndex] !=  ON_DRIVER)
                 ALOGV("DBG(%s): DQed buffer status abnormal (%d) ",
@@ -3979,6 +3749,8 @@ void ExynosCameraHWInterface2::m_streamFunc_direct(SignalDrivenThread *self)
                 res = selfStreamParms->streamOps->cancel_buffer(selfStreamParms->streamOps,
                         &(selfStreamParms->svcBufHandle[selfStreamParms->bufIndex]));
                 ALOGV("DEBUG(%s): streamthread[%d] cancel_buffer to svc done res(%d)", __FUNCTION__, selfThread->m_index, res);
+                if ((currentOutputStreams & STREAM_MASK_PREVIEW) && selfThread->m_index == 0)
+                    m_requestManager->DecreaseSkipCnt();
             }
             if (directOutputEnabled) {
                 if (!m_nightCaptureFrameCnt)
@@ -4147,8 +3919,6 @@ void ExynosCameraHWInterface2::m_streamThreadFunc(SignalDrivenThread * self)
 {
     uint32_t                currentSignal   = self->GetProcessingSignal();
     StreamThread *          selfThread      = ((StreamThread*)self);
-    stream_parameters_t     *selfStreamParms =  &(selfThread->m_parameters);
-    node_info_t             *currentNode    = selfStreamParms->node;
 
     ALOGV("DEBUG(%s): m_streamThreadFunc[%d] (%x)", __FUNCTION__, selfThread->m_index, currentSignal);
 
@@ -4223,19 +3993,85 @@ void ExynosCameraHWInterface2::m_jpegEncThreadFunc(SignalDrivenThread * self)
     return;
 }
 
+void ExynosCameraHWInterface2::m_miscThreadFunc(SignalDrivenThread *self)
+{
+    uint32_t currentSignal = self->GetProcessingSignal();
+    MiscThread *selfThread = (MiscThread *)self;
+
+    ALOGV("(%s): signal (%x)", __FUNCTION__, currentSignal);
+
+    if (currentSignal & SIGNAL_THREAD_RELEASE) {
+        ALOGV("(%s): START SIGNAL_THREAD_RELEASE", __FUNCTION__);
+
+        ALOGV("(%s): END SIGNAL_THREAD_RELEASE", __FUNCTION__);
+        selfThread->SetSignal(SIGNAL_THREAD_TERMINATE);
+        return;
+    }
+
+    if (currentSignal & SIGNAL_STREAM_REPROCESSING_START) {
+        StreamThread *sccThread = (StreamThread *)(m_streamThreads[1].get());
+        stream_parameters_t *sccStreamParms = &(sccThread->m_parameters);
+        status_t res;
+        buffer_handle_t *buf = NULL;
+        bool found = false;
+        nsecs_t frameTimeStamp;
+
+        ALOGV("(%s):  START SIGNAL_STREAM_REPROCESSING_START", __FUNCTION__);
+
+        m_streamBufferInit(sccThread);
+
+        res = m_reprocessOps->acquire_buffer(m_reprocessOps, &buf);
+        if (res != NO_ERROR || buf == NULL) {
+            ALOGE("(%s): [reprocess] unable to acquire_buffer : %d", __FUNCTION__, res);
+            return;
+        }
+
+        const private_handle_t *priv_handle = reinterpret_cast<const private_handle_t *>(*buf);
+        int checkingIndex = 0;
+        for (checkingIndex = 0; checkingIndex < sccStreamParms->numSvcBuffers; checkingIndex++) {
+            if (priv_handle->fd == sccStreamParms->svcBuffers[checkingIndex].fd.extFd[0]) {
+                found = true;
+                break;
+            }
+        }
+        ALOGV("(%s): dequeued buf %x => found(%d) index(%d)",
+            __FUNCTION__, (unsigned int)buf, found, checkingIndex);
+
+        if (!found)
+            return;
+
+        for (int i = 0; i < NUM_MAX_SUBSTREAM; i++) {
+            if (sccThread->m_attachedSubStreams[i].streamId == -1)
+                continue;
+
+            frameTimeStamp = m_requestManager->GetTimestampByFrameCnt(m_reprocessingFrameCnt);
+            m_requestManager->NotifyStreamOutput(m_reprocessingFrameCnt);
+            if (m_currentReprocessOutStreams & (1 << sccThread->m_attachedSubStreams[i].streamId))
+                m_runSubStreamFunc(sccThread, &(sccStreamParms->svcBuffers[checkingIndex]),
+                    sccThread->m_attachedSubStreams[i].streamId, frameTimeStamp);
+        }
+
+        res = m_reprocessOps->release_buffer(m_reprocessOps, buf);
+        if (res != NO_ERROR) {
+            ALOGE("(%s): [reprocess] unable to release_buffer : %d", __FUNCTION__, res);
+            return;
+        }
+        ALOGV("(%s): END   SIGNAL_STREAM_REPROCESSING_START", __FUNCTION__);
+    }
+    return;
+}
+
 int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuffer *srcImageBuf, nsecs_t frameTimeStamp)
 {
     Mutex::Autolock lock(m_jpegEncoderLock);
     stream_parameters_t     *selfStreamParms = &(selfThread->m_parameters);
     substream_parameters_t  *subParms        = &m_subStreams[STREAM_ID_JPEG];
     status_t    res;
-    ExynosRect jpegRect;
     bool found = false;
     int srcW, srcH, srcCropX, srcCropY;
     int pictureW, pictureH, pictureFramesize = 0;
     int pictureFormat;
     int cropX, cropY, cropW, cropH = 0;
-    ExynosBuffer resizeBufInfo;
     ExynosRect   m_jpegPictureRect;
     buffer_handle_t * buf = NULL;
 
@@ -4287,6 +4123,9 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
                    0);
     pictureFormat = V4L2_PIX_FMT_YUYV;
     pictureFramesize = FRAME_SIZE(V4L2_PIX_2_HAL_PIXEL_FORMAT(pictureFormat), pictureW, pictureH);
+
+    m_getAlignedYUVSize(V4L2_PIX_FMT_YUYV, m_jpegPictureRect.w, m_jpegPictureRect.h, &m_resizeBuf);
+
     if (m_exynosPictureCSC) {
         float zoom_w = 0, zoom_h = 0;
         if (m_zoomRatio == 0)
@@ -4316,7 +4155,7 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
         csc_set_dst_format(m_exynosPictureCSC,
                            m_jpegPictureRect.w, m_jpegPictureRect.h,
                            0, 0, m_jpegPictureRect.w, m_jpegPictureRect.h,
-                           V4L2_PIX_2_HAL_PIXEL_FORMAT(V4L2_PIX_FMT_NV16),
+                           V4L2_PIX_2_HAL_PIXEL_FORMAT(V4L2_PIX_FMT_YUYV),
                            0);
         for (int i = 0 ; i < 3 ; i++)
             ALOGV("DEBUG(%s): m_pictureBuf.fd.extFd[%d]=%d ",
@@ -4333,13 +4172,7 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
         if (csc_convert(m_exynosPictureCSC) != 0)
             ALOGE("ERR(%s): csc_convert() fail", __FUNCTION__);
 
-        resizeBufInfo = m_resizeBuf;
-
-        m_getAlignedYUVSize(V4L2_PIX_FMT_NV16, m_jpegPictureRect.w, m_jpegPictureRect.h, &m_resizeBuf);
-
-        jpegRect.w = m_jpegPictureRect.w;
-        jpegRect.h = m_jpegPictureRect.h;
-        jpegRect.colorFormat = V4L2_PIX_FMT_NV16;
+        m_jpegPictureRect.colorFormat = V4L2_PIX_FMT_YUYV;
 
         for (int j = 0; j < 3; j++)
             ALOGV("DEBUG(%s): dest buf node  fd.extFd[%d]=%d size=%d virt=%x ",
@@ -4347,12 +4180,11 @@ int ExynosCameraHWInterface2::m_jpegCreator(StreamThread *selfThread, ExynosBuff
                 (unsigned int)subParms->svcBuffers[subParms->svcBufIndex].size.extS[j],
                 (unsigned int)subParms->svcBuffers[subParms->svcBufIndex].virt.extP[j]);
 
-        m_setExifChangedAttribute(&mExifInfo, &jpegRect, &m_jpegMetadata);
-        m_resizeBuf = resizeBufInfo;
+        m_setExifChangedAttribute(&mExifInfo, &m_jpegPictureRect, &m_jpegMetadata);
 
         jpegEncParms.m_yuvBuf = m_resizeBuf;
         jpegEncParms.m_jpegBuf = subParms->svcBuffers[subParms->svcBufIndex];
-        jpegEncParms.m_rect = jpegRect;
+        jpegEncParms.m_rect = m_jpegPictureRect;
         memcpy(&jpegEncParms.m_exifInfo, &mExifInfo, sizeof(exif_attribute_t));
         jpegEncParms.m_jpegQuality = m_jpegMetadata.shot.ctl.jpeg.quality;
         jpegEncParms.m_thumbQuality = m_jpegMetadata.shot.ctl.jpeg.thumbnailQuality;
@@ -4376,9 +4208,7 @@ int ExynosCameraHWInterface2::m_recordCreator(StreamThread *selfThread, ExynosBu
     stream_parameters_t     *selfStreamParms = &(selfThread->m_parameters);
     substream_parameters_t  *subParms        = &m_subStreams[STREAM_ID_RECORD];
     status_t    res;
-    ExynosRect jpegRect;
     bool found = false;
-    int cropX, cropY, cropW, cropH = 0;
     buffer_handle_t * buf = NULL;
 
     ALOGV("DEBUG(%s): index(%d)",__FUNCTION__, subParms->svcBufIndex);
@@ -4664,8 +4494,6 @@ bool ExynosCameraHWInterface2::yuv2Jpeg(ExynosBuffer *yuvBuf, ExynosBuffer *jpeg
                                         ExynosRect *rect, exif_attribute_t *exifInfo,
                                         int jpegQuality, int thumbQuality)
 {
-    unsigned char *addr;
-
     ExynosJpegEncoderForCamera jpegEnc;
     bool ret = false;
     int res = 0;
@@ -4909,7 +4737,7 @@ void ExynosCameraHWInterface2::OnAfTriggerCAF(void)
         if ((m_ctlInfo.flash.i_flashMode >= AA_AEMODE_ON_AUTO_FLASH)
                 && (m_ctlInfo.flash.m_flashEnableFlg == false)
                 && (m_cameraId == 0)) {
-            ALOGV("[AF Flash] AF Flash start with Mode (%d) state (%d) id (%d)", m_afMode, m_afState, id);
+            ALOGV("[AF Flash] AF Flash start with Mode (%d) state (%d) id (%d)", m_afMode, m_afState, m_cameraId);
             m_ctlInfo.flash.m_flashEnableFlg = true;
             m_ctlInfo.flash.m_flashState = FLASH_STATE_ON;
             m_ctlInfo.flash.m_flashDecisionResult = false;
@@ -5717,6 +5545,17 @@ void ExynosCameraHWInterface2::JpegEncThread::enqueueEncoding(jpegEnc_parameters
     SetSignal(SIGNAL_JPEG_START_ENCODING);
 }
 
+ExynosCameraHWInterface2::MiscThread::MiscThread()
+{
+    ALOGV("(%s):", __FUNCTION__);
+}
+
+void ExynosCameraHWInterface2::MiscThread::release()
+{
+    ALOGV("(%s):", __func__);
+    SetSignal(SIGNAL_THREAD_RELEASE);
+}
+
 int ExynosCameraHWInterface2::createIonClient(ion_client ionClient)
 {
     if (ionClient == 0) {
@@ -5761,11 +5600,10 @@ int ExynosCameraHWInterface2::allocCameraMemory(ion_client ionClient, ExynosBuff
             break;
         }
         if (1 << i & cacheFlag)
-            flag = ION_FLAG_CACHED;
+            flag = ION_FLAG_CACHED | ION_FLAG_CACHED_NEEDS_SYNC | ION_FLAG_PRESERVE_KMAP;
         else
             flag = 0;
-        buf->fd.extFd[i] = ion_alloc(ionClient, \
-                                      buf->size.extS[i], 0, ION_HEAP_EXYNOS_MASK, flag);
+        buf->fd.extFd[i] = ion_alloc(ionClient, buf->size.extS[i], 0, ION_HEAP_SYSTEM_MASK, flag);
         if ((buf->fd.extFd[i] == -1) ||(buf->fd.extFd[i] == 0)) {
             ALOGE("[%s]ion_alloc(%d) failed\n", __FUNCTION__, buf->size.extS[i]);
             buf->fd.extFd[i] = -1;

@@ -59,7 +59,7 @@ namespace android {
 #define NODE_PREFIX     "/dev/video"
 
 #define NUM_MAX_STREAM_THREAD       (5)
-#define NUM_MAX_REQUEST_MGR_ENTRY   (5)
+#define NUM_MAX_REQUEST_MGR_ENTRY   (6)
 #define NUM_MAX_CAMERA_BUFFERS      (16)
 #define NUM_BAYER_BUFFERS           (8)
 #define NUM_SCC_BUFFERS             (8)
@@ -73,7 +73,6 @@ namespace android {
 #define STREAM_TYPE_DIRECT   (0)
 #define STREAM_TYPE_INDIRECT (1)
 
-#define SIGNAL_MAIN_REQ_Q_NOT_EMPTY             (SIGNAL_THREAD_COMMON_LAST<<1)
 
 #define SIGNAL_MAIN_STREAM_OUTPUT_DONE          (SIGNAL_THREAD_COMMON_LAST<<3)
 #define SIGNAL_SENSOR_START_REQ_PROCESSING      (SIGNAL_THREAD_COMMON_LAST<<4)
@@ -241,6 +240,7 @@ public:
     void    SetDefaultParameters(int cropX);
     void    SetInitialSkip(int count);
     int     GetSkipCnt();
+    void    DecreaseSkipCnt();
     int     GetCompletedIndex();
     void    pushSensorQ(int index);
     int     popSensorQ();
@@ -274,57 +274,11 @@ private:
     List<int>                   m_sensorQ;
 };
 
-
-typedef struct bayer_buf_entry {
-    int     status;
-    int     reqFrameCnt;
-    nsecs_t timeStamp;
-} bayer_buf_entry_t;
-
-
-class BayerBufManager {
-public:
-    BayerBufManager();
-    ~BayerBufManager();
-    int                 GetIndexForSensorEnqueue();
-    int                 MarkSensorEnqueue(int index);
-    int                 MarkSensorDequeue(int index, int reqFrameCnt, nsecs_t *timeStamp);
-    int                 GetIndexForIspEnqueue(int *reqFrameCnt);
-    int                 GetIndexForIspDequeue(int *reqFrameCnt);
-    int                 MarkIspEnqueue(int index);
-    int                 MarkIspDequeue(int index);
-    int                 GetNumOnSensor();
-    int                 GetNumOnHalFilled();
-    int                 GetNumOnIsp();
-
-private:
-    int                 GetNextIndex(int index);
-
-    int                 sensorEnqueueHead;
-    int                 sensorDequeueHead;
-    int                 ispEnqueueHead;
-    int                 ispDequeueHead;
-    int                 numOnSensor;
-    int                 numOnIsp;
-    int                 numOnHalFilled;
-    int                 numOnHalEmpty;
-
-    bayer_buf_entry_t   entries[NUM_BAYER_BUFFERS];
-};
-
-
 #define NOT_AVAILABLE           (0)
 #define REQUIRES_DQ_FROM_SVC    (1)
 #define ON_DRIVER               (2)
 #define ON_HAL                  (3)
 #define ON_SERVICE              (4)
-
-#define BAYER_NOT_AVAILABLE     (0)
-#define BAYER_ON_SENSOR         (1)
-#define BAYER_ON_HAL_FILLED     (2)
-#define BAYER_ON_ISP            (3)
-#define BAYER_ON_SERVICE        (4)
-#define BAYER_ON_HAL_EMPTY      (5)
 
 typedef struct stream_parameters {
             uint32_t                width;
@@ -499,20 +453,35 @@ class MainThread : public SignalDrivenThread {
 
     };
 
+    class MiscThread : public SignalDrivenThread {
+        ExynosCameraHWInterface2 *mHardware;
+    public:
+        MiscThread(ExynosCameraHWInterface2 *hw):
+            SignalDrivenThread(),
+            mHardware(hw) { }
+        MiscThread();
+        void threadFunctionInternal() {
+            mHardware->m_miscThreadFunc(this);
+            return;
+        }
+        void            release(void);
+    };
+
     sp<MainThread>      m_mainThread;
     sp<SensorThread>    m_sensorThread;
     sp<StreamThread>    m_streamThreads[NUM_MAX_STREAM_THREAD];
     sp<JpegEncThread>   m_jpegEncThread;
+    sp<MiscThread>      m_miscThread;
     substream_parameters_t  m_subStreams[STREAM_ID_LAST+1];
 
     RequestManager      *m_requestManager;
-    BayerBufManager     *m_BayerManager;
     ExynosCamera2       *m_camera2;
 
     void                m_mainThreadFunc(SignalDrivenThread * self);
     void                m_sensorThreadFunc(SignalDrivenThread * self);
     void                m_streamThreadFunc(SignalDrivenThread * self);
     void                m_jpegEncThreadFunc(SignalDrivenThread * self);
+    void                m_miscThreadFunc(SignalDrivenThread * self);
 
     void                m_streamThreadInitialize(SignalDrivenThread * self);
 
@@ -590,8 +559,6 @@ class MainThread : public SignalDrivenThread {
     camera2_notify_callback             m_notifyCb;
     void                                *m_callbackCookie;
 
-    int                                 m_numOfRemainingReqInSvc;
-    bool                                m_isRequestQueuePending;
     bool                                m_isRequestQueueNull;
     camera2_device_t                    *m_halDevice;
     static gralloc_module_t const*      m_grallocHal;
@@ -603,30 +570,24 @@ class MainThread : public SignalDrivenThread {
 
     bool                                m_isIspStarted;
 
-    int                                 m_need_streamoff;
     ExynosBuffer                        m_sccLocalBuffer[NUM_MAX_CAMERA_BUFFERS];
     bool                                m_sccLocalBufferValid;
 
-    int                                 indexToQueue[3+1];
-
-    bool                                m_scp_flushing;
-    bool                                m_closing;
     ExynosBuffer                        m_resizeBuf;
     int                                 m_currentReprocessOutStreams;
     ExynosBuffer                        m_previewCbBuf;
     int             				    m_cameraId;
-    bool                                m_scp_closing;
-    bool                                m_scp_closed;
     bool                                m_wideAspect;
     uint32_t                            m_currentAfRegion[4];
     float                               m_zoomRatio;
 
     int                                 m_vdisBubbleCnt;
     int                                 m_vdisDupFrame;
+    bool                                m_isAlreadyRegistered;
 
-    mutable Mutex                       m_qbufLock;
     mutable Mutex                       m_jpegEncoderLock;
     mutable Mutex                       m_TriggerLock;
+    mutable Mutex                       m_streamInitLock;
 
     bool                                m_scpForceSuspended;
     int                                 m_afState;
@@ -637,8 +598,6 @@ class MainThread : public SignalDrivenThread {
     bool                                m_IsAfLockRequired;
     int                                 m_serviceAfState;
     struct camera2_shot_ext             m_jpegMetadata;
-    int                                 m_scpOutputSignalCnt;
-    int                                 m_scpOutputImageCnt;
     int                                 m_nightCaptureCnt;
     int                                 m_nightCaptureFrameCnt;
     int                                 m_lastSceneMode;

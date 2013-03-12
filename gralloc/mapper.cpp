@@ -31,6 +31,7 @@
 #include <hardware/gralloc.h>
 
 #include "gralloc_priv.h"
+#include "exynos_format.h"
 
 #include <ion/ion.h>
 #include <linux/ion.h>
@@ -39,7 +40,27 @@
 
 static int gralloc_map(gralloc_module_t const* module, buffer_handle_t handle)
 {
+    size_t chroma_vstride;
+    size_t chroma_size;
     private_handle_t* hnd = (private_handle_t*)handle;
+
+    switch(hnd->format) {
+    case HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED:
+    case HAL_PIXEL_FORMAT_EXYNOS_YCrCb_420_SP:
+    case HAL_PIXEL_FORMAT_YCbCr_420_SP:
+        {
+            chroma_vstride = ALIGN(hnd->height / 2, 32);
+            chroma_size = chroma_vstride * hnd->stride;
+            break;
+        }
+    case HAL_PIXEL_FORMAT_EXYNOS_YV12:
+        {
+            chroma_size = (hnd->vstride / 2) * ALIGN(hnd->stride / 2, 16);
+            break;
+        }
+    default:
+        break;
+    }
 
     void* mappedAddress = mmap(0, hnd->size, PROT_READ|PROT_WRITE, MAP_SHARED, 
                                hnd->fd, 0);
@@ -50,12 +71,44 @@ static int gralloc_map(gralloc_module_t const* module, buffer_handle_t handle)
     ALOGV("%s: base %p %d %d %d %d\n", __func__, mappedAddress, hnd->size,
           hnd->width, hnd->height, hnd->stride);
     hnd->base = mappedAddress;
+
+    if (hnd->fd1 >= 0) {
+        void* mappedAddress1 = (void*)mmap(0, chroma_size, PROT_READ|PROT_WRITE,
+                                            MAP_SHARED, hnd->fd1, 0);
+        hnd->base1 = mappedAddress1;
+    }
+    if (hnd->fd2 >= 0) {
+        void* mappedAddress2 = (void*)mmap(0, chroma_size, PROT_READ|PROT_WRITE,
+                                            MAP_SHARED, hnd->fd2, 0);
+        hnd->base2 = mappedAddress2;
+    }
+
     return 0;
 }
 
 static int gralloc_unmap(gralloc_module_t const* module, buffer_handle_t handle)
 {
     private_handle_t* hnd = (private_handle_t*)handle;
+    size_t chroma_vstride;
+    size_t chroma_size;
+
+    switch(hnd->format) {
+    case HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED:
+    case HAL_PIXEL_FORMAT_EXYNOS_YCrCb_420_SP:
+    case HAL_PIXEL_FORMAT_YCbCr_420_SP:
+        {
+            chroma_vstride = ALIGN(hnd->height / 2, 32);
+            chroma_size = chroma_vstride * hnd->stride;
+            break;
+        }
+    case HAL_PIXEL_FORMAT_EXYNOS_YV12:
+        {
+            chroma_size = (hnd->vstride / 2) * ALIGN(hnd->stride / 2, 16);
+            break;
+        }
+    default:
+        break;
+    }
 
     if (!hnd->base)
         return 0;
@@ -67,6 +120,24 @@ static int gralloc_unmap(gralloc_module_t const* module, buffer_handle_t handle)
     ALOGV("%s: base %p %d %d %d %d\n", __func__, hnd->base, hnd->size,
           hnd->width, hnd->height, hnd->stride);
     hnd->base = 0;
+    if (hnd->fd1 >= 0) {
+        if (!hnd->base1)
+            return 0;
+        if (munmap(hnd->base1, chroma_size) < 0) {
+            ALOGE("%s :could not unmap %s %p %d", __func__, strerror(errno),
+                  hnd->base1, chroma_size);
+        }
+        hnd->base1 = 0;
+    }
+    if (hnd->fd2 >= 0) {
+        if (!hnd->base2)
+            return 0;
+        if (munmap(hnd->base2, chroma_size) < 0) {
+            ALOGE("%s :could not unmap %s %p %d", __func__, strerror(errno),
+                  hnd->base2, chroma_size);
+        }
+        hnd->base2 = 0;
+    }
     return 0;
 }
 
@@ -167,6 +238,12 @@ int gralloc_lock(gralloc_module_t const* module,
     if (!hnd->base)
         gralloc_map(module, hnd);
     *vaddr = (void*)hnd->base;
+
+    if (hnd->fd1 >= 0)
+        vaddr[1] = (void*)hnd->base1;
+    if (hnd->fd2 >= 0)
+        vaddr[2] = (void*)hnd->base2;
+
     return 0;
 }
 
