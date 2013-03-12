@@ -34,6 +34,11 @@ LOCAL_SRC_FILES := 	\
 	
 LOCAL_MODULE := gralloc.exynos5
 LOCAL_CFLAGS:= -DLOG_TAG=\"gralloc\"
+
+ifeq ($(BOARD_USE_NORMAL_DRM), true)
+	LOCAL_CFLAGS += -DUSE_NORMAL_DRM
+endif
+
 LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE_OWNER := samsung_arm
 
